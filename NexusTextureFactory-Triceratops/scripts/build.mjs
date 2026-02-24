@@ -9,6 +9,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const distDir = path.join(projectRoot, "dist");
 
 async function main() {
+  // CI: tiny change to trigger workflow runs.
   // Produce a clean, Pages-friendly artifact (no node_modules, no dotfiles).
   await rm(distDir, { recursive: true, force: true });
   await mkdir(distDir, { recursive: true });
