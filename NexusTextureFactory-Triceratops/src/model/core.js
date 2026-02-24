@@ -99,6 +99,7 @@ return Math.max(0, Math.min(1, 1 - d * 2.2));`;
         const META_KEY_DREAM_PARAMS = 'alphacarve-meta-dream-params-v1';
         const META_KEY_UI_PREFS = 'alphacarve-meta-ui-prefs-v1';
         const META_KEY_PACK_CONFIG = 'alphacarve-meta-pack-config-v1';
+        const META_KEY_FLIPBOOK_CONFIG = 'alphacarve-meta-flipbook-config-v1';
 
         const getDefaultBlendForCategory = (cat) => {
             if (cat === 'GEN') return 0;
@@ -118,6 +119,85 @@ return Math.max(0, Math.min(1, 1 - d * 2.2));`;
                 universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 }
             };
         });
+
+        const STEP_TYPE_KEY_BY_ID = Object.entries(STEP_TYPES).reduce((acc, [key, value]) => {
+            acc[value.id] = key;
+            return acc;
+        }, {});
+
+        const createDefaultFlipbookConfig = () => {
+            const operations = {};
+            Object.entries(STEP_TYPES).forEach(([key, td]) => {
+                const params = {};
+                td.controls.forEach((c) => {
+                    if (c.type !== 'slider') return;
+                    const isAngle = /angle/i.test(c.label || '');
+                    const span = Number(c.max) - Number(c.min);
+                    params[c.key] = {
+                        enabled: false,
+                        range: isAngle ? 24 : Math.max(0.01, span * 0.08),
+                        speed: 1.0,
+                        phase: 0.0,
+                        wave: 'wrap'
+                    };
+                });
+                operations[key] = {
+                    enabled: false,
+                    expanded: false,
+                    speed: 1.0,
+                    wave: 'wrap',
+                    universal: {
+                        mult: { enabled: false, range: 0.05, speed: 1.0, phase: 0.11, wave: 'wrap' },
+                        scale: { enabled: false, range: 0.02, speed: 1.0, phase: 0.29, wave: 'wrap' }
+                    },
+                    params
+                };
+            });
+
+            const turnOn = (opKey, paramKey, range, speed = 1.0, wave = 'wrap', phase = 0.0) => {
+                const op = operations[opKey];
+                if (!op) return;
+                op.enabled = true;
+                if (paramKey === 'mult' || paramKey === 'scale') {
+                    op.universal[paramKey] = { enabled: true, range, speed, phase, wave };
+                    return;
+                }
+                if (!op.params[paramKey]) return;
+                op.params[paramKey] = { enabled: true, range, speed, phase, wave };
+            };
+
+            turnOn('NOISE_PERLIN', 'p6', 0.35);
+            turnOn('NOISE_PERLIN', 'p7', 0.35, 1.0, 'wrap', 0.17);
+            turnOn('NOISE_WORLEY', 'p6', 0.28);
+            turnOn('NOISE_WORLEY', 'p7', 0.28, 1.0, 'wrap', 0.17);
+            turnOn('SPIRAL', 'p1', 0.16, 1.0, 'pingpong');
+            turnOn('SMEAR', 'p2', 0.06, 0.8, 'pingpong');
+            turnOn('DOMAIN_WARP', 'p3', 0.08, 0.9, 'pingpong');
+            turnOn('RADIAL_WARP', 'p2', 0.2, 0.8, 'pingpong');
+            turnOn('LIBRARY_DISPLACE', 'p1', 0.08, 0.8, 'pingpong');
+            turnOn('NOISE_PERLIN', 'mult', 0.02, 1.0, 'wrap', 0.11);
+            turnOn('NOISE_PERLIN', 'scale', 0.01, 1.0, 'wrap', 0.29);
+            turnOn('NOISE_WORLEY', 'mult', 0.02, 1.0, 'wrap', 0.11);
+            turnOn('NOISE_WORLEY', 'scale', 0.01, 1.0, 'wrap', 0.29);
+
+            return {
+                global: {
+                    enabled: true,
+                    frameCount: 16,
+                    strength: 1.0,
+                    baseSpeed: 1.0,
+                    seedMode: 'stable'
+                },
+                quality: {
+                    enabled: true,
+                    minFrameDensity: 0.03,
+                    maxEmptyFrameRatio: 0.25,
+                    minFrameDelta: 0.008,
+                    maxFrameDelta: 0.2
+                },
+                operations
+            };
+        };
 
         let textureDbPromise = null;
         const getTextureDb = () => {
@@ -205,42 +285,98 @@ return Math.max(0, Math.min(1, 1 - d * 2.2));`;
             return t < 0.5 ? t * 2 : (1 - t) * 2;
         };
 
-        const buildAnimatedConfigFrame = (baseConfig, frameIndex, totalFrames, seed = 'default') => {
+        const resolveStepKey = (step) => {
+            if (!step?.typeDef) return null;
+            if (step.typeKey) return step.typeKey;
+            return STEP_TYPE_KEY_BY_ID[step.typeDef.id] || null;
+        };
+
+        const findControlForParam = (stepKey, paramKey) => {
+            const td = stepKey ? STEP_TYPES[stepKey] : null;
+            if (!td || !Array.isArray(td.controls)) return null;
+            return td.controls.find((c) => c.key === paramKey) || null;
+        };
+
+        const clampToControl = (value, control) => {
+            if (!control || control.type !== 'slider') return value;
+            return Math.max(Number(control.min), Math.min(Number(control.max), value));
+        };
+
+        const buildAnimatedConfigFrame = (baseConfig, frameIndex, totalFrames, seed = 'default', flipbookConfig) => {
             if (!Array.isArray(baseConfig)) return [];
-            if (frameIndex <= 0 || totalFrames <= 1) {
+            const fbGlobal = flipbookConfig?.global || {};
+            if (frameIndex <= 0 || totalFrames <= 1 || fbGlobal.enabled === false) {
                 return JSON.parse(JSON.stringify(baseConfig));
             }
             const t = frameIndex / Math.max(1, totalFrames - 1);
+            const baseStrength = Number(fbGlobal.strength ?? 1.0);
+            const baseSpeed = Number(fbGlobal.baseSpeed ?? 1.0);
             return baseConfig.map((s, idx) => {
                 if (idx === 0 || idx === baseConfig.length - 1) return s;
                 const nextParams = { ...s.params };
                 const nextUniversal = { ...s.universal };
+                const stepKey = resolveStepKey(s);
+                const opCfg = (stepKey && flipbookConfig?.operations?.[stepKey]) ? flipbookConfig.operations[stepKey] : null;
+                if (!opCfg || !opCfg.enabled) return { ...s, params: nextParams, universal: nextUniversal };
 
-                if (s.typeDef.cat === 'ERODE') {
-                    const modeX = pickAnimationMode(seed, idx, 'p6');
-                    const modeY = pickAnimationMode(seed, idx, 'p7');
-                    const wx = animationWave(modeX, t);
-                    const wy = animationWave(modeY, t + 0.17);
-                    nextParams.p6 = (s.params.p6 || 0) + wx * 0.5;
-                    nextParams.p7 = (s.params.p7 || 0) + wy * 0.5;
-                } else if (s.typeDef.id === 13) {
-                    const mode = pickAnimationMode(seed, idx, 'spiral');
-                    const w = animationWave(mode, t);
-                    nextParams.p1 = Math.max(0, Math.min(2, s.params.p1 + w * 0.2));
-                } else if (s.typeDef.id === 12) {
-                    const mode = pickAnimationMode(seed, idx, 'fractal');
-                    const w = animationWave(mode, t);
-                    nextParams.p1 = Math.max(1, Math.min(16, s.params.p1 + Math.round(w * 1.5)));
-                }
+                Object.keys(nextParams).forEach((paramKey) => {
+                    const pCfg = opCfg.params?.[paramKey];
+                    if (!pCfg || !pCfg.enabled) return;
+                    const waveMode = pCfg.wave || opCfg.wave || pickAnimationMode(seed, idx, paramKey);
+                    const speed = baseSpeed * Number(opCfg.speed ?? 1.0) * Number(pCfg.speed ?? 1.0);
+                    const phase = Number(pCfg.phase ?? 0.0);
+                    const wave = animationWave(waveMode, t * speed + phase);
+                    const delta = wave * Number(pCfg.range ?? 0) * baseStrength;
+                    const ctrl = findControlForParam(stepKey, paramKey);
+                    const nextValue = (Number(s.params[paramKey]) || 0) + delta;
+                    nextParams[paramKey] = clampToControl(nextValue, ctrl);
+                });
 
-                const multMode = pickAnimationMode(seed, idx, 'mult');
-                const scaleMode = pickAnimationMode(seed, idx, 'scale');
-                const wm = animationWave(multMode, t + 0.11);
-                const ws = animationWave(scaleMode, t + 0.29);
-                nextUniversal.mult = s.universal.mult + wm * 0.05;
-                nextUniversal.scale = s.universal.scale + ws * 0.02;
+                ['mult', 'scale'].forEach((key) => {
+                    const uCfg = opCfg.universal?.[key];
+                    if (!uCfg || !uCfg.enabled) return;
+                    const waveMode = uCfg.wave || opCfg.wave || pickAnimationMode(seed, idx, key);
+                    const speed = baseSpeed * Number(opCfg.speed ?? 1.0) * Number(uCfg.speed ?? 1.0);
+                    const phase = Number(uCfg.phase ?? 0.0);
+                    const wave = animationWave(waveMode, t * speed + phase);
+                    const delta = wave * Number(uCfg.range ?? 0) * baseStrength;
+                    nextUniversal[key] = (Number(s.universal[key]) || 0) + delta;
+                });
                 return { ...s, params: nextParams, universal: nextUniversal };
             });
+        };
+
+        const extractAlphaFromPixels = (pixels) => {
+            const alpha = new Uint8Array(pixels.length / 4);
+            for (let i = 0, j = 0; i < pixels.length; i += 4, j++) alpha[j] = pixels[i + 3];
+            return alpha;
+        };
+
+        const computeFrameDelta = (prevAlpha, nextAlpha) => {
+            if (!prevAlpha || !nextAlpha || prevAlpha.length !== nextAlpha.length) return 0;
+            let diff = 0;
+            for (let i = 0; i < prevAlpha.length; i++) diff += Math.abs(prevAlpha[i] - nextAlpha[i]);
+            return diff / (prevAlpha.length * 255);
+        };
+
+        const evaluateFlipbookFrames = (analyses, deltas, qualityConfig) => {
+            const quality = qualityConfig || {};
+            if (quality.enabled === false) return { pass: true, reason: '', metrics: {} };
+            const frameCount = Math.max(1, analyses.length);
+            const minDensity = Number(quality.minFrameDensity ?? 0);
+            const maxEmptyRatio = Number(quality.maxEmptyFrameRatio ?? 1);
+            const minDelta = Number(quality.minFrameDelta ?? 0);
+            const maxDelta = Number(quality.maxFrameDelta ?? 1);
+            let empty = 0;
+            analyses.forEach((a) => { if (!a || a.density < minDensity) empty++; });
+            const emptyRatio = empty / frameCount;
+            const avgDelta = deltas.length ? (deltas.reduce((sum, v) => sum + v, 0) / deltas.length) : 0;
+            const maxObservedDelta = deltas.length ? Math.max(...deltas) : 0;
+            const minObservedDelta = deltas.length ? Math.min(...deltas) : 0;
+            if (emptyRatio > maxEmptyRatio) return { pass: false, reason: 'too_many_empty_frames', metrics: { emptyRatio, avgDelta, maxObservedDelta, minObservedDelta } };
+            if (avgDelta < minDelta) return { pass: false, reason: 'motion_too_static', metrics: { emptyRatio, avgDelta, maxObservedDelta, minObservedDelta } };
+            if (maxObservedDelta > maxDelta) return { pass: false, reason: 'motion_too_busy', metrics: { emptyRatio, avgDelta, maxObservedDelta, minObservedDelta } };
+            return { pass: true, reason: '', metrics: { emptyRatio, avgDelta, maxObservedDelta, minObservedDelta } };
         };
 
         const computeAlphaHash = (pixels, width, height) => {

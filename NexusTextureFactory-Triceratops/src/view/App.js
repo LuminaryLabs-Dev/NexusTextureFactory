@@ -4,6 +4,7 @@
                 <button onClick={() => uiVM.setActiveTab('builder')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'builder' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>WORKBENCH</button>
                 <button onClick={() => uiVM.setActiveTab('library')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'library' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>LIBRARY</button>
                 <button onClick={() => uiVM.setActiveTab('sets')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'sets' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>SETS</button>
+                <button onClick={() => uiVM.setActiveTab('flipbook')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'flipbook' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>FLIPBOOK</button>
                 <button onClick={() => uiVM.setActiveTab('filters')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'filters' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>FILTERS</button>
                 <button onClick={() => uiVM.setActiveTab('operations')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'operations' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>OPERATIONS</button>
                 <button onClick={() => uiVM.setActiveTab('editor')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'editor' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>EDITOR</button>
@@ -22,9 +23,10 @@
                     </div>
                     <div className="flex-1 overflow-hidden relative">
                         {vm.ui.activeTab === 'builder' && <BuilderTab bVM={vm.builder} uiVM={vm.ui} customOpsVM={vm.customOps} />}
-                        {vm.ui.activeTab === 'generator' && <GeneratorTab dVM={vm.dream} libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} />}
-                        {vm.ui.activeTab === 'library' && <LibraryTab libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} />}
-                        {vm.ui.activeTab === 'sets' && <SetsTab libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} />}
+                        {vm.ui.activeTab === 'generator' && <GeneratorTab dVM={vm.dream} libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} flipbookVM={vm.flipbook} />}
+                        {vm.ui.activeTab === 'library' && <LibraryTab libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} flipbookVM={vm.flipbook} />}
+                        {vm.ui.activeTab === 'sets' && <SetsTab libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} flipbookVM={vm.flipbook} />}
+                        {vm.ui.activeTab === 'flipbook' && <FlipbookTab flipbookVM={vm.flipbook} />}
                         {vm.ui.activeTab === 'filters' && <FiltersTab filtersVM={vm.filters} />}
                         {vm.ui.activeTab === 'operations' && <OperationsTab customOpsVM={vm.customOps} />}
                         {vm.ui.activeTab === 'editor' && <EditorTab customOpsVM={vm.customOps} />}

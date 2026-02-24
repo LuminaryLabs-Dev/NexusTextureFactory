@@ -11,6 +11,7 @@
                 alpha: { enabled: true, min: 0.15, max: 0.75, expanded: true },
                 similarity: { enabled: false, maxSimilarity: 0.9, historySize: 200, expanded: false },
                 shape: { enabled: false, minCircularity: 0.2, maxCircularity: 1.0, minSquareness: 0.2, maxSquareness: 1.0, expanded: false },
+                staticMotion: { enabled: true, min: 0.0, max: 0.85, expanded: false },
                 simplicity: { enabled: true, min: 0.1, max: 0.9, expanded: false }
             });
             const [packConfig, setPackConfig] = useState({
@@ -20,6 +21,7 @@
                 sortBy: 'name',
                 sortDir: 'asc'
             });
+            const [flipbookConfig, setFlipbookConfig] = useState(createDefaultFlipbookConfig());
 	            const [dreamParams, setDreamParams] = useState({ batchSize: 20, batchCycles: 1, generationWorkers: 1, packagingWorkers: 1, refineCycles: 1, minDensity: 0.15, maxDensity: 0.75, minSimplicity: 0.1, maxSimplicity: 0.9, varianceStrictness: 0.1, randStrength: 0.5, flipFrames: 16, prompt: "", minComplexity: 1, maxComplexity: 4, autoDream: false });
 
             const autoDreamRef = useRef(false);
@@ -41,6 +43,35 @@
 	            useEffect(() => { savedLibraryRef.current = savedLibrary; }, [savedLibrary]);
 	            useEffect(() => { dreamResultsRef.current = dreamState.results; }, [dreamState.results]);
 	            useEffect(() => { deleteHistoryRef.current = deleteHistory; }, [deleteHistory]);
+                const mergeFlipbookConfig = useCallback((incoming) => {
+                    const base = createDefaultFlipbookConfig();
+                    if (!incoming || typeof incoming !== 'object') return base;
+                    const merged = {
+                        ...base,
+                        ...incoming,
+                        global: { ...base.global, ...(incoming.global || {}) },
+                        quality: { ...base.quality, ...(incoming.quality || {}) },
+                        operations: {}
+                    };
+                    Object.keys(base.operations).forEach((key) => {
+                        const bOp = base.operations[key];
+                        const inOp = incoming.operations?.[key] || {};
+                        const op = {
+                            ...bOp,
+                            ...inOp,
+                            universal: {
+                                mult: { ...bOp.universal.mult, ...(inOp.universal?.mult || {}) },
+                                scale: { ...bOp.universal.scale, ...(inOp.universal?.scale || {}) }
+                            },
+                            params: {}
+                        };
+                        Object.keys(bOp.params).forEach((paramKey) => {
+                            op.params[paramKey] = { ...bOp.params[paramKey], ...(inOp.params?.[paramKey] || {}) };
+                        });
+                        merged.operations[key] = op;
+                    });
+                    return merged;
+                }, []);
 	            useEffect(() => {
 	                try {
 	                    const rawLibrary = localStorage.getItem(META_KEY_LIBRARY);
@@ -68,6 +99,7 @@
                                 alpha: { ...prev.alpha, ...(parsed.alpha || {}) },
                                 similarity: { ...prev.similarity, ...(parsed.similarity || {}) },
                                 shape: { ...prev.shape, ...(parsed.shape || {}) },
+                                staticMotion: { ...prev.staticMotion, ...(parsed.staticMotion || {}) },
                                 simplicity: { ...prev.simplicity, ...(parsed.simplicity || {}) }
                             }));
                         }
@@ -89,9 +121,14 @@
                         const parsed = JSON.parse(rawPackConfig);
                         if (parsed && typeof parsed === 'object') setPackConfig(prev => ({ ...prev, ...parsed }));
                     }
+                    const rawFlipbookConfig = localStorage.getItem(META_KEY_FLIPBOOK_CONFIG);
+                    if (rawFlipbookConfig) {
+                        const parsed = JSON.parse(rawFlipbookConfig);
+                        setFlipbookConfig(mergeFlipbookConfig(parsed));
+                    }
                 } catch (_) { }
                 hasHydratedMetaRef.current = true;
-            }, []);
+            }, [mergeFlipbookConfig]);
 	            useEffect(() => {
 	                if (!hasHydratedMetaRef.current) return;
 	                if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
@@ -105,6 +142,7 @@
                         localStorage.setItem(META_KEY_DREAM_PARAMS, JSON.stringify(dreamParams));
                         localStorage.setItem(META_KEY_UI_PREFS, JSON.stringify({ autoAnimateFrames }));
                         localStorage.setItem(META_KEY_PACK_CONFIG, JSON.stringify(packConfig));
+                        localStorage.setItem(META_KEY_FLIPBOOK_CONFIG, JSON.stringify(flipbookConfig));
                     } catch (_) { }
                 }, 220);
 	                return () => {
@@ -113,7 +151,7 @@
 	                        persistTimerRef.current = null;
 	                    }
 	                };
-            }, [savedLibrary, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, packConfig]);
+            }, [savedLibrary, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, packConfig, flipbookConfig]);
 
             const sets = useMemo(() => {
                 const normalizeName = (item) => String(item?.name || 'Misc');
@@ -234,6 +272,12 @@
                 const simplicityFilter = qualityFilters.simplicity;
                 if (simplicityFilter.enabled && (analysis.sScore < simplicityFilter.min || analysis.sScore > simplicityFilter.max)) return false;
 
+                const staticFilter = qualityFilters.staticMotion;
+                if (staticFilter.enabled) {
+                    const staticPct = Number(analysis.staticPct || 0);
+                    if (staticPct < staticFilter.min || staticPct > staticFilter.max) return false;
+                }
+
                 const shapeFilter = qualityFilters.shape;
                 if (shapeFilter.enabled) {
                     if (analysis.circularity < shapeFilter.minCircularity) return false;
@@ -255,6 +299,27 @@
                 }
 
                 return true;
+            };
+
+            const computeStaticPercentageForConfig = (engine, baseConfig, frameCount, seed, renderOptions) => {
+                const total = Math.max(3, frameCount || 6);
+                const threshold = Number(flipbookConfig?.quality?.minFrameDelta ?? 0.008);
+                let prevAlpha = null;
+                let staticCount = 0;
+                let deltaCount = 0;
+                for (let i = 0; i < total; i++) {
+                    const cfg = buildAnimatedConfigFrame(baseConfig, i, total, seed, flipbookConfig);
+                    engine.renderStack(cfg, renderOptions);
+                    const alpha = extractAlphaFromPixels(engine.readPixels(cfg.length - 1));
+                    if (prevAlpha) {
+                        const delta = computeFrameDelta(prevAlpha, alpha);
+                        if (delta < threshold) staticCount++;
+                        deltaCount++;
+                    }
+                    prevAlpha = alpha;
+                }
+                if (deltaCount <= 0) return 1.0;
+                return staticCount / deltaCount;
             };
 
 	            const storageKeySizesRef = useRef(new Map());
@@ -466,9 +531,13 @@
                                 const cfg = gRS();
                                 const needsLibraryTexture = hasLibrarySamples && cfg.some(s => s?.typeDef && (s.typeDef.id === 110 || s.typeDef.id === 111));
                                 const librarySource = needsLibraryTexture && libraryRenderCache.length > 0 ? libraryRenderCache[Math.floor(Math.random() * libraryRenderCache.length)] : null;
-                                workerEngine.renderStack(cfg, librarySource ? { librarySource } : undefined);
+                                const renderOptions = librarySource ? { librarySource } : undefined;
+                                workerEngine.renderStack(cfg, renderOptions);
                                 const an = workerEngine.analyzeTexture(cfg.length - 1);
+                                const staticPct = computeStaticPercentageForConfig(workerEngine, cfg, 6, `gen-${b}-${i}-${attempts}`, renderOptions);
+                                an.staticPct = staticPct;
                                 if (passesQualityFilters(an, acceptedHashes)) {
+                                    workerEngine.renderStack(cfg, renderOptions);
                                     const textureBlob = await workerEngine.getTextureBlob(cfg.length - 1);
                                     const storageKey = `tex-${Date.now()}-${Math.random().toString(36).slice(2)}`;
                                     const tempResultUrl = URL.createObjectURL(textureBlob);
@@ -484,6 +553,7 @@
                                         sScore: an.sScore,
                                         circularity: an.circularity,
                                         squareness: an.squareness,
+                                        staticPct: an.staticPct,
                                         hash: an.hash,
                                         name: generateSemanticName({ config: cfg, density: an.density, sScore: an.sScore }, existingNames)
                                     };
@@ -553,14 +623,35 @@
 	                            sC.width = 1024 * mult;
 	                            sC.height = 1024;
 	                            const sCtx = sC.getContext('2d');
+                                const sequenceSeed = flipbookConfig?.global?.seedMode === 'random'
+                                    ? `${baseFileName}|${mult}|${Math.random().toString(36).slice(2)}`
+                                    : `${baseFileName}|${mult}`;
+                                const frameOutputs = [];
+                                const analyses = [];
+                                const deltas = [];
+                                let prevAlpha = null;
 	                            for (let i = 0; i < mult; i++) {
-	                                const cfg = buildAnimatedConfigFrame(base, i, mult, `${baseFileName}|${mult}`);
+	                                const cfg = buildAnimatedConfigFrame(base, i, mult, sequenceSeed, flipbookConfig);
 	                                fE.renderStack(cfg);
-	                                const frame = await fE.getTextureCanvasAndBlob(cfg.length - 1);
-	                                subFolder.file(`frame_${(i + 1).toString().padStart(2, '0')}.png`, frame.blob);
-	                                const frameCanvas = frame.canvas;
-	                                sCtx.drawImage(frameCanvas, i * 1024, 0);
+                                        analyses.push(fE.analyzeTexture(cfg.length - 1));
+                                        const alpha = extractAlphaFromPixels(fE.readPixels(cfg.length - 1));
+                                        if (prevAlpha) deltas.push(computeFrameDelta(prevAlpha, alpha));
+                                        prevAlpha = alpha;
+	                                frameOutputs.push(await fE.getTextureCanvasAndBlob(cfg.length - 1));
 	                            }
+                                const evalResult = evaluateFlipbookFrames(analyses, deltas, flipbookConfig?.quality);
+                                const shouldFallbackToStatic = !evalResult.pass;
+                                if (shouldFallbackToStatic) {
+                                    frameOutputs.length = 0;
+                                    fE.renderStack(base);
+                                    const still = await fE.getTextureCanvasAndBlob(base.length - 1);
+                                    for (let i = 0; i < mult; i++) frameOutputs.push(still);
+                                }
+                                for (let i = 0; i < frameOutputs.length; i++) {
+                                    const frame = frameOutputs[i];
+                                    subFolder.file(`frame_${(i + 1).toString().padStart(2, '0')}.png`, frame.blob);
+                                    sCtx.drawImage(frame.canvas, i * 1024, 0);
+                                }
 	                            const spriteSheetBlob = await new Promise((resolve) => {
 	                                sC.toBlob((blob) => resolve(blob || new Blob()), 'image/png');
 	                            });
@@ -605,6 +696,60 @@
                 ui: { activeTab, setActiveTab, showGizmos, setShowGizmos, enableAI, setEnableAI, autoAnimateFrames, setAutoAnimateFrames },
                 storage: { usedBytes: storageUsedBytes, quotaBytes: storageQuotaBytes },
                 customOps: { items: customOperations, add: (op) => setCustomOperations(prev => [...prev, op]) },
+                flipbook: {
+                    config: flipbookConfig,
+                    setConfig: setFlipbookConfig,
+                    resetDefaults: () => setFlipbookConfig(createDefaultFlipbookConfig()),
+                    updateGlobal: (key, value) => setFlipbookConfig(prev => ({ ...prev, global: { ...prev.global, [key]: value } })),
+                    updateQuality: (key, value) => setFlipbookConfig(prev => ({ ...prev, quality: { ...prev.quality, [key]: value } })),
+                    toggleOperationEnabled: (opKey) => setFlipbookConfig(prev => ({
+                        ...prev,
+                        operations: {
+                            ...prev.operations,
+                            [opKey]: { ...prev.operations[opKey], enabled: !prev.operations[opKey]?.enabled }
+                        }
+                    })),
+                    toggleOperationExpanded: (opKey) => setFlipbookConfig(prev => ({
+                        ...prev,
+                        operations: {
+                            ...prev.operations,
+                            [opKey]: { ...prev.operations[opKey], expanded: !prev.operations[opKey]?.expanded }
+                        }
+                    })),
+                    updateOperation: (opKey, patch) => setFlipbookConfig(prev => ({
+                        ...prev,
+                        operations: {
+                            ...prev.operations,
+                            [opKey]: { ...prev.operations[opKey], ...patch }
+                        }
+                    })),
+                    updateParam: (opKey, paramKey, patch) => setFlipbookConfig(prev => ({
+                        ...prev,
+                        operations: {
+                            ...prev.operations,
+                            [opKey]: {
+                                ...prev.operations[opKey],
+                                params: {
+                                    ...prev.operations[opKey].params,
+                                    [paramKey]: { ...prev.operations[opKey].params[paramKey], ...patch }
+                                }
+                            }
+                        }
+                    })),
+                    updateUniversal: (opKey, key, patch) => setFlipbookConfig(prev => ({
+                        ...prev,
+                        operations: {
+                            ...prev.operations,
+                            [opKey]: {
+                                ...prev.operations[opKey],
+                                universal: {
+                                    ...prev.operations[opKey].universal,
+                                    [key]: { ...prev.operations[opKey].universal[key], ...patch }
+                                }
+                            }
+                        }
+                    }))
+                },
                 filters: {
                     modules: filterModules,
                     quality: qualityFilters,

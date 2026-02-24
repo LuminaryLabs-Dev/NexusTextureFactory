@@ -1,6 +1,7 @@
-        function TextureItemFlip({ item, onClick, onSave, onDelete, engine, isRejected, rejectLabel, flipFrames, autoAnimate = false }) {
-            const [frames, setFrames] = useState([]); const [fi, setFi] = useState(0); const [isH, setIsH] = useState(false); const [isL, setIsL] = useState(false); const [storedUrl, setStoredUrl] = useState(item.url || null); const hT = useRef(null); const aI = useRef(null);
+        function TextureItemFlip({ item, onClick, onSave, onDelete, engine, isRejected, rejectLabel, flipFrames, autoAnimate = false, flipbookConfig = null }) {
+            const [frames, setFrames] = useState([]); const [fi, setFi] = useState(0); const [isH, setIsH] = useState(false); const [isL, setIsL] = useState(false); const [storedUrl, setStoredUrl] = useState(item.url || null); const [flipbookReject, setFlipbookReject] = useState(''); const hT = useRef(null); const aI = useRef(null);
             const fmtScore = (value) => (typeof value === 'number' && !Number.isNaN(value) ? value.toFixed(2) : '--');
+            const fmtPct = (value) => (typeof value === 'number' && !Number.isNaN(value) ? `${(value * 100).toFixed(0)}%` : '--');
             useEffect(() => {
                 let revokedUrl = null;
                 let cancelled = false;
@@ -34,15 +35,33 @@
                 hT.current = setTimeout(async () => {
                     if (!engine) return;
                     setIsL(true);
+                    setFlipbookReject('');
                     const generated = [];
                     const base = JSON.parse(JSON.stringify(item.config));
-                    const total = Math.max(2, flipFrames || 16);
+                    const configuredFrames = parseInt(flipbookConfig?.global?.frameCount || flipFrames || 16);
+                    const total = Math.max(2, configuredFrames);
+                    const seed = flipbookConfig?.global?.seedMode === 'random'
+                        ? `${item?.id || item?.name || 'preview'}|${Math.random().toString(36).slice(2)}`
+                        : (item?.id || item?.name || 'preview');
+                    const analyses = [];
+                    const deltas = [];
+                    let prevAlpha = null;
                     for (let i = 0; i < total; i++) {
-                        const cfg = buildAnimatedConfigFrame(base, i, total, item?.id || item?.name || 'preview');
+                        const cfg = buildAnimatedConfigFrame(base, i, total, seed, flipbookConfig);
                         engine.renderStack(cfg);
+                        analyses.push(engine.analyzeTexture(cfg.length - 1));
+                        const alpha = extractAlphaFromPixels(engine.readPixels(cfg.length - 1));
+                        if (prevAlpha) deltas.push(computeFrameDelta(prevAlpha, alpha));
+                        prevAlpha = alpha;
                         generated.push(engine.getTextureUrl(cfg.length - 1));
                     }
-                    setFrames(generated);
+                    const evalResult = evaluateFlipbookFrames(analyses, deltas, flipbookConfig?.quality);
+                    if (evalResult.pass) {
+                        setFrames(generated);
+                    } else {
+                        setFrames([]);
+                        setFlipbookReject(evalResult.reason.replaceAll('_', ' '));
+                    }
                     setIsL(false);
                 }, 500);
             };
@@ -61,6 +80,7 @@
                 <div className={`relative aspect-square bg-[#000] checkerboard border border-gray-800 rounded overflow-hidden group dream-item-enter ${isRejected ? 'opacity-50' : 'hover:border-purple-500'}`} onMouseEnter={hME} onMouseLeave={hML}>
                     <img src={dU} className={`w-full h-full object-contain transition-opacity ${isRejected ? 'opacity-20 blur-sm' : ''}`} />
                     {isL && (<div className="absolute top-2 right-2"><div className="w-3 h-3 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div></div>)}
+                    {!isL && flipbookReject && <div className="absolute top-2 right-2 bg-black/80 border border-orange-500 text-orange-300 text-[8px] px-1.5 py-0.5 rounded uppercase">{flipbookReject}</div>}
                     {isRejected && <div className="absolute inset-0 flex flex-col items-center justify-center font-bold text-red-500"><span className="text-4xl">✕</span><span className="text-xs bg-black px-1">{rejectLabel}</span></div>}
                     {!isRejected && (<>
                         <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
@@ -69,6 +89,7 @@
                                 <div>simple: {fmtScore(item.sScore)}</div>
                                 <div>circle: {fmtScore(item.circularity)}</div>
                                 <div>square: {fmtScore(item.squareness)}</div>
+                                <div>static: {fmtPct(item.staticPct)}</div>
                             </div>
                         </div>
                         <div className="absolute bottom-0 inset-x-0 bg-black/80 p-1 text-[9px] text-gray-300 truncate text-center font-mono py-1.5">{item.name}</div>
@@ -216,7 +237,7 @@
             );
         }
 
-        function GeneratorTab({ dVM, libVM, previewEngine, uiVM }) {
+        function GeneratorTab({ dVM, libVM, previewEngine, uiVM, flipbookVM }) {
             const [showC, setShowC] = useState(true);
             const results = dVM.state.results || [];
             const liveStart = Math.max(0, results.length - 24);
@@ -248,7 +269,7 @@
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 pb-48 relative">
                         {dVM.isDreaming && <div className="fixed top-24 left-1/2 -translate-x-1/2 bg-black/90 px-6 py-2 rounded-full border border-purple-500 text-purple-400 text-xs font-mono animate-pulse z-40 shadow-2xl">{dVM.state.phase} | attempts: {dVM.state.pendingAttempts || 0} | accepted: {dVM.state.pendingAccepted || 0} | rejected: {dVM.state.pendingRejected || 0}</div>}
-                        <div className="grid grid-cols-6 gap-4">{results.map((it, idx) => idx >= liveStart ? <TextureItemFlip key={it.id} item={it} engine={previewEngine} flipFrames={dVM.params.flipFrames} autoAnimate={uiVM?.autoAnimateFrames} onDelete={() => dVM.onDeleteResult(it.id)} onSave={libVM.onSave} onClick={libVM.onLoad} /> : <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} flipFrames={dVM.params.flipFrames} autoAnimate={uiVM?.autoAnimateFrames} onDelete={() => dVM.onDeleteResult(it.id)} onSave={libVM.onSave} onClick={libVM.onLoad} />)}</div>
+                        <div className="grid grid-cols-6 gap-4">{results.map((it, idx) => idx >= liveStart ? <TextureItemFlip key={it.id} item={it} engine={previewEngine} flipFrames={dVM.params.flipFrames} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} onDelete={() => dVM.onDeleteResult(it.id)} onSave={libVM.onSave} onClick={libVM.onLoad} /> : <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} flipFrames={dVM.params.flipFrames} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} onDelete={() => dVM.onDeleteResult(it.id)} onSave={libVM.onSave} onClick={libVM.onLoad} />)}</div>
                     </div>
                     <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-4">
                         <div className="bg-black/80 backdrop-blur-md px-6 py-2 rounded-full border border-gray-800 flex items-center gap-4 shadow-xl pointer-events-auto">
@@ -330,6 +351,23 @@
                                     <input type="range" min="0" max="1" step="0.01" value={quality.shape.minSquareness} onChange={(e) => filtersVM.updateQuality('shape', 'minSquareness', parseFloat(e.target.value))} className="w-full slider-thumb" />
                                     <div className="flex justify-between"><span className="text-gray-400">Max Squareness</span><span>{quality.shape.maxSquareness.toFixed(2)}</span></div>
                                     <input type="range" min="0" max="1" step="0.01" value={quality.shape.maxSquareness} onChange={(e) => filtersVM.updateQuality('shape', 'maxSquareness', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                </div>
+                            )}
+                        </div>
+                        <div className="bg-[#1a1a1a] border border-gray-800 rounded overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-2 bg-[#202020]">
+                                <button onClick={() => filtersVM.toggleQualityExpanded('staticMotion')} className="text-sm font-bold text-white">Motion Static %</button>
+                                <div className="flex items-center gap-2">
+                                    <button onClick={() => filtersVM.toggleQualityEnabled('staticMotion')} className={`text-[10px] px-2 py-1 rounded font-bold ${quality.staticMotion?.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{quality.staticMotion?.enabled ? 'ON' : 'OFF'}</button>
+                                    <button onClick={() => filtersVM.toggleQualityExpanded('staticMotion')} className="text-xs text-gray-400 w-6">{quality.staticMotion?.expanded ? '▼' : '▶'}</button>
+                                </div>
+                            </div>
+                            {quality.staticMotion?.expanded && (
+                                <div className="p-3 text-xs space-y-3">
+                                    <div className="flex justify-between"><span className="text-gray-400">Min Static %</span><span>{(quality.staticMotion.min * 100).toFixed(0)}%</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.staticMotion.min} onChange={(e) => filtersVM.updateQuality('staticMotion', 'min', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                    <div className="flex justify-between"><span className="text-gray-400">Max Static %</span><span>{(quality.staticMotion.max * 100).toFixed(0)}%</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.staticMotion.max} onChange={(e) => filtersVM.updateQuality('staticMotion', 'max', parseFloat(e.target.value))} className="w-full slider-thumb" />
                                 </div>
                             )}
                         </div>
@@ -419,7 +457,7 @@
             );
         }
 
-        function LibraryTab({ libVM, previewEngine, uiVM }) {
+        function LibraryTab({ libVM, previewEngine, uiVM, flipbookVM }) {
             return (
                 <div className="flex flex-col h-full bg-[#111] p-6">
                     <div className="mb-6">
@@ -427,14 +465,14 @@
                     </div>
                     <div className="flex-1 overflow-y-auto">
                         <div className="grid grid-cols-8 gap-4">
-                            {libVM.items.map((it) => <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} autoAnimate={uiVM?.autoAnimateFrames} />)}
+                            {libVM.items.map((it) => <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} />)}
                         </div>
                     </div>
                 </div>
             );
         }
 
-        function SetsTab({ libVM, previewEngine, uiVM }) {
+        function SetsTab({ libVM, previewEngine, uiVM, flipbookVM }) {
             const cfg = libVM.packConfig || {};
             const setCfg = (patch) => libVM.setPackConfig(prev => ({ ...prev, ...patch }));
             return (
@@ -515,7 +553,7 @@
                                     <div className="text-[10px] text-red-400 mb-3 font-mono">{libVM.exportError}</div>
                                 )}
                                 <div className="grid grid-cols-10 gap-2">
-                                    {set.items.map((it) => <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} autoAnimate={uiVM?.autoAnimateFrames} />)}
+                                    {set.items.map((it) => <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} />)}
                                 </div>
                             </div>
                         ))}</div>
@@ -829,6 +867,108 @@ void main() {
                                 </div>
                             </label>
                         </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function FlipbookTab({ flipbookVM }) {
+            const cfg = flipbookVM?.config;
+            if (!cfg) return <div className="p-6 text-gray-400">Flipbook configuration unavailable.</div>;
+            const opEntries = Object.entries(STEP_TYPES).filter(([_, td]) => Array.isArray(td.controls) && td.controls.length > 0);
+            return (
+                <div className="flex flex-col h-full bg-[#111] p-6">
+                    <div className="mb-6 flex items-center justify-between">
+                        <div>
+                            <h2 className="text-xl font-bold text-white">FLIPBOOK</h2>
+                            <p className="text-xs text-gray-400 mt-1">Per-operation animation controls and sequence quality gates.</p>
+                        </div>
+                        <button onClick={() => flipbookVM.resetDefaults()} className="text-[10px] px-3 py-1.5 rounded font-bold bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-200 border border-gray-700">RESET DEFAULTS</button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                        <div className="bg-[#1a1a1a] border border-gray-800 rounded p-3">
+                            <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold mb-3">Global Motion</div>
+                            <div className="grid grid-cols-2 gap-4 text-xs">
+                                <div className="flex items-center justify-between"><span className="text-gray-300">Enabled</span><button onClick={() => flipbookVM.updateGlobal('enabled', !cfg.global.enabled)} className={`text-[10px] px-2 py-1 rounded font-bold ${cfg.global.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{cfg.global.enabled ? 'ON' : 'OFF'}</button></div>
+                                <div className="flex flex-col gap-1">
+                                    <div className="flex justify-between"><span className="text-gray-400">Frame Count</span><span>{cfg.global.frameCount}</span></div>
+                                    <input type="range" min="2" max="32" step="1" value={cfg.global.frameCount} onChange={(e) => flipbookVM.updateGlobal('frameCount', parseInt(e.target.value))} className="w-full slider-thumb" />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                    <div className="flex justify-between"><span className="text-gray-400">Strength</span><span>{cfg.global.strength.toFixed(2)}</span></div>
+                                    <input type="range" min="0" max="2" step="0.01" value={cfg.global.strength} onChange={(e) => flipbookVM.updateGlobal('strength', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                    <div className="flex justify-between"><span className="text-gray-400">Base Speed</span><span>{cfg.global.baseSpeed.toFixed(2)}</span></div>
+                                    <input type="range" min="0.1" max="4" step="0.05" value={cfg.global.baseSpeed} onChange={(e) => flipbookVM.updateGlobal('baseSpeed', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="bg-[#1a1a1a] border border-gray-800 rounded p-3">
+                            <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold mb-3">Quality Gates</div>
+                            <div className="grid grid-cols-2 gap-4 text-xs">
+                                <div className="flex items-center justify-between"><span className="text-gray-300">Enabled</span><button onClick={() => flipbookVM.updateQuality('enabled', !cfg.quality.enabled)} className={`text-[10px] px-2 py-1 rounded font-bold ${cfg.quality.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{cfg.quality.enabled ? 'ON' : 'OFF'}</button></div>
+                                <div className="flex flex-col gap-1"><div className="flex justify-between"><span className="text-gray-400">Min Frame Density</span><span>{cfg.quality.minFrameDensity.toFixed(3)}</span></div><input type="range" min="0" max="0.3" step="0.001" value={cfg.quality.minFrameDensity} onChange={(e) => flipbookVM.updateQuality('minFrameDensity', parseFloat(e.target.value))} className="w-full slider-thumb" /></div>
+                                <div className="flex flex-col gap-1"><div className="flex justify-between"><span className="text-gray-400">Max Empty Ratio</span><span>{cfg.quality.maxEmptyFrameRatio.toFixed(2)}</span></div><input type="range" min="0" max="1" step="0.01" value={cfg.quality.maxEmptyFrameRatio} onChange={(e) => flipbookVM.updateQuality('maxEmptyFrameRatio', parseFloat(e.target.value))} className="w-full slider-thumb" /></div>
+                                <div className="flex flex-col gap-1"><div className="flex justify-between"><span className="text-gray-400">Min Motion Delta</span><span>{cfg.quality.minFrameDelta.toFixed(3)}</span></div><input type="range" min="0" max="0.15" step="0.001" value={cfg.quality.minFrameDelta} onChange={(e) => flipbookVM.updateQuality('minFrameDelta', parseFloat(e.target.value))} className="w-full slider-thumb" /></div>
+                                <div className="flex flex-col gap-1"><div className="flex justify-between"><span className="text-gray-400">Max Motion Delta</span><span>{cfg.quality.maxFrameDelta.toFixed(3)}</span></div><input type="range" min="0.01" max="1" step="0.001" value={cfg.quality.maxFrameDelta} onChange={(e) => flipbookVM.updateQuality('maxFrameDelta', parseFloat(e.target.value))} className="w-full slider-thumb" /></div>
+                            </div>
+                        </div>
+                        <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold pt-1">Operation Ladder</div>
+                        {opEntries.map(([key, td], idx) => {
+                            const op = cfg.operations?.[key];
+                            if (!op) return null;
+                            return (
+                                <div key={key} className="bg-[#1a1a1a] border border-gray-800 rounded overflow-hidden">
+                                    <div className="flex items-center justify-between px-3 py-2 bg-[#202020]">
+                                        <button onClick={() => flipbookVM.toggleOperationExpanded(key)} className="flex items-center gap-3 text-left">
+                                            <span className="text-xs text-gray-500 w-6">{idx + 1}.</span>
+                                            <span className="text-sm font-bold text-white">{td.name}</span>
+                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={() => flipbookVM.toggleOperationEnabled(key)} className={`text-[10px] px-2 py-1 rounded font-bold ${op.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{op.enabled ? 'ON' : 'OFF'}</button>
+                                            <button onClick={() => flipbookVM.toggleOperationExpanded(key)} className="text-xs text-gray-400 w-6">{op.expanded ? '▼' : '▶'}</button>
+                                        </div>
+                                    </div>
+                                    {op.expanded && (
+                                        <div className="p-3 text-xs grid grid-cols-2 gap-4">
+                                            <div className="space-y-2">
+                                                <div className="flex flex-col gap-1">
+                                                    <div className="flex justify-between"><span className="text-gray-400">Operation Speed</span><span>{op.speed.toFixed(2)}</span></div>
+                                                    <input type="range" min="0.1" max="4" step="0.05" value={op.speed} onChange={(e) => flipbookVM.updateOperation(key, { speed: parseFloat(e.target.value) })} className="w-full slider-thumb" />
+                                                </div>
+                                                {Object.entries(op.params || {}).map(([paramKey, paramCfg]) => (
+                                                    <div key={paramKey} className="bg-[#151515] border border-gray-800 rounded p-2">
+                                                        <div className="flex justify-between items-center mb-1">
+                                                            <span className="text-gray-300">{paramKey}</span>
+                                                            <button onClick={() => flipbookVM.updateParam(key, paramKey, { enabled: !paramCfg.enabled })} className={`text-[10px] px-2 py-0.5 rounded font-bold ${paramCfg.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{paramCfg.enabled ? 'ON' : 'OFF'}</button>
+                                                        </div>
+                                                        <div className="flex justify-between"><span className="text-gray-500">Range</span><span>{Number(paramCfg.range).toFixed(3)}</span></div>
+                                                        <input type="range" min="0" max="2" step="0.001" value={paramCfg.range} onChange={(e) => flipbookVM.updateParam(key, paramKey, { range: parseFloat(e.target.value) })} className="w-full slider-thumb" />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="space-y-2">
+                                                {['mult', 'scale'].map((uKey) => {
+                                                    const u = op.universal?.[uKey];
+                                                    if (!u) return null;
+                                                    return (
+                                                        <div key={uKey} className="bg-[#151515] border border-gray-800 rounded p-2">
+                                                            <div className="flex justify-between items-center mb-1">
+                                                                <span className="text-gray-300">{uKey}</span>
+                                                                <button onClick={() => flipbookVM.updateUniversal(key, uKey, { enabled: !u.enabled })} className={`text-[10px] px-2 py-0.5 rounded font-bold ${u.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{u.enabled ? 'ON' : 'OFF'}</button>
+                                                            </div>
+                                                            <div className="flex justify-between"><span className="text-gray-500">Range</span><span>{Number(u.range).toFixed(3)}</span></div>
+                                                            <input type="range" min="0" max="1" step="0.001" value={u.range} onChange={(e) => flipbookVM.updateUniversal(key, uKey, { range: parseFloat(e.target.value) })} className="w-full slider-thumb" />
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             );
