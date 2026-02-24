@@ -1,0 +1,2018 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AlphaCarve | Intelligent Material Pipeline</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body {
+            background-color: #0f0f0f;
+            color: #e5e5e5;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+        }
+
+        .checkerboard {
+            background-color: #1a1a1a;
+            background-image:
+                linear-gradient(45deg, #222 25%, transparent 25%),
+                linear-gradient(-45deg, #222 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #222 75%),
+                linear-gradient(-45deg, transparent 75%, #222 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0f0f0f;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        .slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            outline: none;
+        }
+
+        .slider-thumb::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            background: #3b82f6;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: background .15s ease-in-out;
+        }
+
+        .slider-thumb:hover::-webkit-slider-thumb {
+            background: #60a5fa;
+        }
+
+        .tab-btn {
+            position: relative;
+            padding-bottom: 2px;
+        }
+
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: #3b82f6;
+            box-shadow: 0 -2px 5px rgba(59, 130, 246, 0.5);
+        }
+
+        @keyframes scaleIn {
+            0% {
+                transform: scale(0.9);
+                opacity: 0;
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .dream-item-enter {
+            animation: scaleIn 0.2s ease-out forwards;
+        }
+
+        .config-scroll::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .config-scroll::-webkit-scrollbar-thumb {
+            background: #444;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+        // ==========================================
+        // 1. GLOBAL CONSTANTS & ENGINE CLASS
+        // ==========================================
+
+        const BLEND_MODES = [
+            { id: 0, name: "Overwrite" },
+            { id: 1, name: "Subtract" },
+            { id: 2, name: "Multiply" },
+            { id: 3, name: "Add" },
+            { id: 4, name: "Max (Lighten)" },
+            { id: 5, name: "Min (Darken)" }
+        ];
+
+        const VS_SOURCE = `attribute vec2 position; varying vec2 vUv; void main() { vUv = position * 0.5 + 0.5; gl_Position = vec4(position, 0.0, 1.0); }`;
+        const FS_TEMPLATE = `precision mediump float; varying vec2 vUv; uniform sampler2D u_prevTexture; uniform vec2 u_resolution; uniform int u_stepType; uniform int u_blendMode; uniform float p1; uniform float p2; uniform float p3; uniform float p4; uniform float p5; uniform float p6; uniform float p7; uniform float u_power; uniform float u_mult; uniform float u_scale; uniform float u_offsetX; uniform float u_offsetY; uniform bool u_hasPrev; vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); } float snoise(vec2 v) { const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439); vec2 i  = floor(v + dot(v, C.yy) ); vec2 x0 = v -   i + dot(i, C.xx); vec2 i1; i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0); vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1; i = mod(i, 289.0); vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 )) + i.x + vec3(0.0, i1.x, 1.0 )); vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0); m = m*m ; m = m*m ; vec3 x = 2.0 * fract(p * C.www) - 1.0; vec3 h = abs(x) - 0.5; vec3 ox = floor(x + 0.5); vec3 a0 = x - ox; m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h ); vec3 g; g.x  = a0.x  * x0.x  + h.x  * x0.y; g.yz = a0.yz * x12.xz + h.yz * x12.yw; return 130.0 * dot(m, g); } vec2 random2( vec2 p ) { return fract(sin(vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3))))*43758.5453); } float worley(vec2 st, float jitter, bool invert) { vec2 i_st = floor(st); vec2 f_st = fract(st); float m_dist = 1.0; for (int y= -1; y <= 1; y++) { for (int x= -1; x <= 1; x++) { vec2 neighbor = vec2(float(x),float(y)); vec2 point = random2(i_st + neighbor); point = 0.5 + 0.5*sin(6.2831*point + jitter); vec2 diff = neighbor + point - f_st; float dist = length(diff); m_dist = min(m_dist, dist); } } return invert ? (1.0 - m_dist) : m_dist; } float samplePrev(vec2 uv) { if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0; return texture2D(u_prevTexture, uv).a; } float sdTriangle(vec2 p, float r) { const float k = sqrt(3.0); p.x = abs(p.x) - r; p.y = p.y + r / k; if(p.x + k*p.y > 0.0) p = vec2(p.x - k*p.y, -k*p.x - p.y)/2.0; p.x -= clamp( p.x, -2.0*r, 0.0 ); return -length(p)*sign(p.y); } float op_shape_sdf(vec2 uv, float type, float size) { vec2 p = (uv - 0.5) * 2.0; if (type < 0.5 || (type >= 2.5 && type < 3.5)) return length(p) - size; if ((type >= 0.5 && type < 1.5) || (type >= 3.5 && type < 4.5)) return max(abs(p.x), abs(p.y)) - size; if ((type >= 1.5 && type < 2.5) || type >= 4.5) return sdTriangle(p, size); return 0.0; } float op_base_shape(vec2 uv, float type, float size, float softness, float thickness) { float d = op_shape_sdf(uv, type, size); bool isWire = type >= 2.5; if (isWire) return 1.0 - smoothstep(thickness, thickness + max(0.001, softness), abs(d)); else return 1.0 - smoothstep(0.0, max(0.001, softness), d); } float op_gradient(vec2 uv, float angle) { float rad = radians(angle); vec2 dir = vec2(cos(rad), sin(rad)); float v = dot(uv - 0.5, dir) + 0.5; return clamp(v, 0.0, 1.0); } float op_perlin(vec2 uv, float scale, float seed, float octaves, float rolloff, float offx, float offy) { vec2 p = (uv + vec2(offx, offy)) * scale + vec2(seed * 17.0, seed * 9.3); float total = 0.0; float amp = 1.0; float maxAmp = 0.0; for(int i = 0; i < 8; i++) { if (float(i) >= octaves) break; total += snoise(p) * amp; maxAmp += amp; p *= 2.0; amp *= rolloff; } float n = total / maxAmp; return n * 0.5 + 0.5; } float op_worley(vec2 uv, float scale, float seed, float jitter, float invert, float offx, float offy) { vec2 p = (uv + vec2(offx, offy)) * scale + vec2(seed * 5.2, seed * 1.4); return worley(p, jitter, invert > 0.5); } float op_vignette(vec2 uv, float shape, float size, float softness) { float d_circle = length(uv - 0.5); float d_square = max(abs(uv.x - 0.5), abs(uv.y - 0.5)); float d = mix(d_circle, d_square, step(0.5, shape)); return 1.0 - smoothstep(size - softness, size, d); } float op_smear(vec2 uv, float angle, float strength) { float rad = radians(angle); vec2 dir = vec2(cos(rad), sin(rad)); float total = 0.0; float count = 8.0; for(float i = 0.0; i < 8.0; i++) { float t = (i / (count - 1.0)) - 0.5; vec2 offset = dir * strength * t; total += samplePrev(uv + offset); } return total / count; } vec2 apply_spiral(vec2 uv, float twist, float cx, float cy) { vec2 center = vec2(cx, cy); vec2 d = uv - center; float r = length(d); float a = atan(d.y, d.x); a += twist * (1.0 - smoothstep(0.0, 1.0, r)) * 6.28; return center + vec2(cos(a), sin(a)) * r; } vec2 apply_fractal(vec2 uv, float segments) { vec2 d = uv - 0.5; float r = length(d); float a = atan(d.y, d.x); float seg = 6.2831 / segments; a = mod(a, seg); a = abs(a - seg/2.0); return vec2(0.5) + vec2(cos(a), sin(a)) * r; } void main() { vec2 uv = vUv; float prevAlpha = texture2D(u_prevTexture, uv).a; if (!u_hasPrev) prevAlpha = 0.0; vec2 opUV = (uv - 0.5) / max(0.001, u_scale) + 0.5 - vec2(u_offsetX, u_offsetY); float currentAlpha = 0.0; vec2 modUv = opUV; if (u_stepType == 12) { modUv = apply_fractal(opUV, p1); float val = samplePrev(modUv); val = clamp(pow(val, u_power) * u_mult, 0.0, 1.0); gl_FragColor = vec4(1.0, 1.0, 1.0, val); return; } if (u_stepType == 13) { modUv = apply_spiral(opUV, p1, p4, p5); float val = samplePrev(modUv); val = clamp(pow(val, u_power) * u_mult, 0.0, 1.0); gl_FragColor = vec4(1.0, 1.0, 1.0, val); return; } if (u_stepType == 16) { float val = op_smear(opUV, p1, p2); val = clamp(pow(val, u_power) * u_mult, 0.0, 1.0); gl_FragColor = vec4(1.0, 1.0, 1.0, val); return; } if (u_stepType == 1) currentAlpha = op_base_shape(opUV, p1, p2, p3, p4); else if (u_stepType == 3) currentAlpha = op_gradient(opUV, p1); else if (u_stepType == 4) currentAlpha = op_perlin(opUV, p1, p2, p3, p4, p6, p7); else if (u_stepType == 5) currentAlpha = op_worley(opUV, p1, p2, p3, p4, p6, p7); else if (u_stepType == 11) { currentAlpha = step(p1, samplePrev(opUV)); currentAlpha = clamp(pow(currentAlpha, u_power) * u_mult, 0.0, 1.0); gl_FragColor = vec4(1.0, 1.0, 1.0, currentAlpha); return; } else if (u_stepType == 14) currentAlpha = op_vignette(opUV, p1, p2, p3); else if (u_stepType == 15) currentAlpha = samplePrev(opUV); currentAlpha = clamp(pow(currentAlpha, u_power) * u_mult, 0.0, 1.0); float finalAlpha = prevAlpha; if (u_blendMode == 0) finalAlpha = currentAlpha; else if (u_blendMode == 1) finalAlpha = max(0.0, prevAlpha - currentAlpha); else if (u_blendMode == 2) finalAlpha = prevAlpha * currentAlpha; else if (u_blendMode == 3) finalAlpha = min(1.0, prevAlpha + currentAlpha); else if (u_blendMode == 4) finalAlpha = max(prevAlpha, currentAlpha); else if (u_blendMode == 5) finalAlpha = min(prevAlpha, currentAlpha); gl_FragColor = vec4(1.0, 1.0, 1.0, finalAlpha); }`;
+
+        const STEP_TYPES = {
+            BASE_SHAPE: { id: 1, name: "Base Shape", cat: "GEN", params: { p1: 0, p2: 0.8, p3: 0.02, p4: 0.05, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Type", type: 'select', options: [{ label: "Circle", value: 0 }, { label: "Square", value: 1 }, { label: "Triangle", value: 2 }, { label: "Wire Circle", value: 3 }, { label: "Wire Square", value: 4 }, { label: "Wire Triangle", value: 5 }] }, { key: 'p2', label: "Size", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p3', label: "Softness", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p4', label: "Thickness", type: 'slider', min: 0, max: 0.5, step: 0.01 }] },
+            BASE_GRAD: { id: 3, name: "Gradient", cat: "GEN", params: { p1: 0, p2: 0, p3: 0, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Angle", type: 'slider', min: 0, max: 360, step: 1 }] },
+            NOISE_PERLIN: { id: 4, name: "Perlin Noise", cat: "ERODE", params: { p1: 4.0, p2: 123, p3: 4, p4: 0.5, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Scale", type: 'slider', min: 0, max: 10, step: 0.1 }, { key: 'p2', label: "Seed", type: 'slider', min: 0, max: 9999, step: 1 }, { key: 'p3', label: "Octaves", type: 'slider', min: 1, max: 8, step: 1 }, { key: 'p4', label: "Rolloff", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p6', label: "Offset X", type: 'slider', min: -1, max: 1, step: 0.01 }, { key: 'p7', label: "Offset Y", type: 'slider', min: -1, max: 1, step: 0.01 }] },
+            NOISE_WORLEY: { id: 5, name: "Worley Noise", cat: "ERODE", params: { p1: 4.0, p2: 456, p3: 1, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Scale", type: 'slider', min: 0, max: 10, step: 0.1 }, { key: 'p2', label: "Seed", type: 'slider', min: 0, max: 9999, step: 1 }, { key: 'p3', label: "Jitter", type: 'slider', min: 0, max: 2, step: 0.1 }, { key: 'p4', label: "Invert", type: 'slider', min: 0, max: 1, step: 1 }, { key: 'p6', label: "Offset X", type: 'slider', min: -1, max: 1, step: 0.01 }, { key: 'p7', label: "Offset Y", type: 'slider', min: -1, max: 1, step: 0.01 }] },
+            THRESHOLD: { id: 11, name: "Threshold", cat: "FILT", params: { p1: 0.5, p2: 0, p3: 0, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Cutoff", type: 'slider', min: 0, max: 1, step: 0.01 }] },
+            FRACTAL: { id: 12, name: "Fractalize", cat: "MOD", params: { p1: 6.0, p2: 0, p3: 0, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Segments", type: 'slider', min: 1, max: 16, step: 1 }] },
+            SPIRAL: { id: 13, name: "Spiral", cat: "MOD", params: { p1: 0.5, p2: 0, p3: 0, p4: 0.5, p5: 0.5, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Twist", type: 'slider', min: 0, max: 2, step: 0.01 }, { key: 'p4', label: "Center X", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p5', label: "Center Y", type: 'slider', min: 0, max: 1, step: 0.01 }] },
+            VIGNETTE: { id: 14, name: "Vignette", cat: "MOD", params: { p1: 0.0, p2: 0.45, p3: 0.2, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Shape", type: 'select', options: [{ label: "Circle", value: 0 }, { label: "Square", value: 1 }] }, { key: 'p2', label: "Size", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p3', label: "Softness", type: 'slider', min: 0, max: 1, step: 0.01 }] },
+            BASIC: { id: 15, name: "Basic / Note", cat: "UTIL", params: { p1: 0, p2: 0, p3: 0, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [] },
+            SMEAR: { id: 16, name: "Smear", cat: "MOD", params: { p1: 0, p2: 0.1, p3: 0, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Angle", type: 'slider', min: 0, max: 360, step: 1 }, { key: 'p2', label: "Strength", type: 'slider', min: 0, max: 1, step: 0.01 }] },
+            DOMAIN_WARP: { id: 101, name: "Domain Warp", cat: "MOD", customOpType: "shader", customCode: "float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); } float noise2(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); float a = hash21(i); float b = hash21(i + vec2(1.0, 0.0)); float c = hash21(i + vec2(0.0, 1.0)); float d = hash21(i + vec2(1.0, 1.0)); vec2 u = f * f * (3.0 - 2.0 * f); return mix(mix(a, b, u.x), mix(c, d, u.x), u.y); } float customOp(vec2 uv){ vec2 p = uv * max(0.001, p1) + vec2(p2 * 0.013, p2 * 0.029); float nx = noise2(p + vec2(12.3, 3.7)); float ny = noise2(p + vec2(4.1, 17.0)); vec2 warp = (vec2(nx, ny) - 0.5) * 2.0 * p3 * 0.2; return samplePrev(uv + warp); }", params: { p1: 4.0, p2: 123, p3: 0.35, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Warp Scale", type: 'slider', min: 0, max: 10, step: 0.1 }, { key: 'p2', label: "Seed", type: 'slider', min: 0, max: 9999, step: 1 }, { key: 'p3', label: "Warp Strength", type: 'slider', min: 0, max: 1, step: 0.01 }] },
+            RADIAL_WARP: { id: 102, name: "Radial Warp", cat: "MOD", customOpType: "shader", customCode: "float customOp(vec2 uv){ vec2 c = vec2(p4, p5); vec2 d = uv - c; float r = length(d); float radius = max(0.001, p3); if (r > radius) return samplePrev(uv); float mode = floor(p1 + 0.5); vec2 outUv = uv; if (mode < 0.5) { float a = atan(d.y, d.x); float t = 1.0 - (r / radius); a += p2 * t * 6.2831853; outUv = c + vec2(cos(a), sin(a)) * r; } else { float k = p2 * (1.0 - r / radius); float scale = (mode < 1.5) ? (1.0 - k) : (1.0 + k); outUv = c + d * max(0.001, scale); } return samplePrev(outUv); }", params: { p1: 0, p2: 0.5, p3: 0.5, p4: 0.5, p5: 0.5, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Mode", type: 'select', options: [{ label: "Twirl", value: 0 }, { label: "Pinch", value: 1 }, { label: "Bulge", value: 2 }] }, { key: 'p2', label: "Strength", type: 'slider', min: -2, max: 2, step: 0.01 }, { key: 'p3', label: "Radius", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p4', label: "Center X", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p5', label: "Center Y", type: 'slider', min: 0, max: 1, step: 0.01 }] },
+            KALEIDOSCOPE_PLUS: { id: 103, name: "Kaleidoscope", cat: "MOD", customOpType: "shader", customCode: "float customOp(vec2 uv){ vec2 d = uv - 0.5; float r = length(d); float a = atan(d.y, d.x) + radians(p2); float seg = 6.2831853 / max(1.0, p1); a = mod(a, seg); if (p3 > 0.5) a = abs(a - seg * 0.5); vec2 outUv = vec2(0.5) + vec2(cos(a), sin(a)) * r; return samplePrev(outUv); }", params: { p1: 6, p2: 0, p3: 1, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Segments", type: 'slider', min: 1, max: 32, step: 1 }, { key: 'p2', label: "Rotation", type: 'slider', min: 0, max: 360, step: 1 }, { key: 'p3', label: "Mirror", type: 'slider', min: 0, max: 1, step: 1 }] },
+            MORPH_DILATE_ERODE: { id: 104, name: "Morph Dilate/Erode", cat: "FILT", customOpType: "shader", customCode: "float customOp(vec2 uv){ float mode = floor(p1 + 0.5); int radius = int(clamp(floor(p2 + 0.5), 0.0, 8.0)); vec2 texel = 1.0 / max(vec2(1.0), u_resolution); float outA = (mode < 0.5) ? 0.0 : 1.0; for (int y = -8; y <= 8; y++) { for (int x = -8; x <= 8; x++) { if (abs(x) > radius || abs(y) > radius) continue; float a = samplePrev(uv + vec2(float(x), float(y)) * texel); if (mode < 0.5) outA = max(outA, a); else outA = min(outA, a); } } return outA; }", params: { p1: 0, p2: 2, p3: 0, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Mode", type: 'select', options: [{ label: "Dilate", value: 0 }, { label: "Erode", value: 1 }] }, { key: 'p2', label: "Radius (px)", type: 'slider', min: 0, max: 8, step: 1 }] },
+            MORPH_OPEN_CLOSE: { id: 105, name: "Morph Open/Close", cat: "FILT", customOpType: "shader", customCode: "float morphDilate(vec2 uv, int r, vec2 texel){ float outA = 0.0; for (int y = -8; y <= 8; y++) for (int x = -8; x <= 8; x++) { if (abs(x) > r || abs(y) > r) continue; outA = max(outA, samplePrev(uv + vec2(float(x), float(y)) * texel)); } return outA; } float morphErode(vec2 uv, int r, vec2 texel){ float outA = 1.0; for (int y = -8; y <= 8; y++) for (int x = -8; x <= 8; x++) { if (abs(x) > r || abs(y) > r) continue; outA = min(outA, samplePrev(uv + vec2(float(x), float(y)) * texel)); } return outA; } float customOp(vec2 uv){ float mode = floor(p1 + 0.5); int r = int(clamp(floor(p2 + 0.5), 0.0, 8.0)); vec2 texel = 1.0 / max(vec2(1.0), u_resolution); if (mode < 0.5) return morphDilate(uv, r, texel); return morphErode(uv, r, texel); }", params: { p1: 0, p2: 2, p3: 0, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Mode", type: 'select', options: [{ label: "Open (Smooth)", value: 0 }, { label: "Close (Fill)", value: 1 }] }, { key: 'p2', label: "Radius (px)", type: 'slider', min: 0, max: 8, step: 1 }] },
+            EDGE_SOBEL: { id: 106, name: "Edge Detect", cat: "FILT", customOpType: "shader", customCode: "float customOp(vec2 uv){ vec2 t = 1.0 / max(vec2(1.0), u_resolution); float tl = samplePrev(uv + vec2(-t.x, -t.y)); float tc = samplePrev(uv + vec2(0.0, -t.y)); float tr = samplePrev(uv + vec2(t.x, -t.y)); float ml = samplePrev(uv + vec2(-t.x, 0.0)); float mr = samplePrev(uv + vec2(t.x, 0.0)); float bl = samplePrev(uv + vec2(-t.x, t.y)); float bc = samplePrev(uv + vec2(0.0, t.y)); float br = samplePrev(uv + vec2(t.x, t.y)); float gx = -tl - 2.0 * ml - bl + tr + 2.0 * mr + br; float gy = -tl - 2.0 * tc - tr + bl + 2.0 * bc + br; float g = length(vec2(gx, gy)) * p1; float a = smoothstep(p2, p2 + 0.05, g); if (p3 > 0.5) a = 1.0 - a; return clamp(a, 0.0, 1.0); }", params: { p1: 1.0, p2: 0.1, p3: 0, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Strength", type: 'slider', min: 0, max: 5, step: 0.05 }, { key: 'p2', label: "Threshold", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p3', label: "Invert", type: 'slider', min: 0, max: 1, step: 1 }] },
+            OUTLINE_ALPHA: { id: 107, name: "Outline", cat: "FILT", customOpType: "shader", customCode: "float customOp(vec2 uv){ vec2 t = 1.0 / max(vec2(1.0), u_resolution); float center = samplePrev(uv); float radius = clamp(p1, 0.0, 8.0); float maxN = 0.0; float minN = 1.0; for (int y = -8; y <= 8; y++) for (int x = -8; x <= 8; x++) { float dx = float(x); float dy = float(y); if (sqrt(dx*dx + dy*dy) > radius) continue; float a = samplePrev(uv + vec2(dx, dy) * t); maxN = max(maxN, a); minN = min(minN, a); } float outer = max(0.0, maxN - center); float inner = max(0.0, center - minN); float mode = floor(p3 + 0.5); float outA = outer; if (mode > 0.5 && mode < 1.5) outA = inner; if (mode >= 1.5) outA = max(outer, inner); return smoothstep(0.0, max(0.001, p2), outA); }", params: { p1: 2.0, p2: 0.1, p3: 2, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Thickness (px)", type: 'slider', min: 0, max: 8, step: 1 }, { key: 'p2', label: "Softness", type: 'slider', min: 0.01, max: 1, step: 0.01 }, { key: 'p3', label: "Mode", type: 'select', options: [{ label: "Outer", value: 0 }, { label: "Inner", value: 1 }, { label: "Both", value: 2 }] }] },
+            POSTERIZE_ALPHA: { id: 108, name: "Posterize Alpha", cat: "FILT", customOpType: "shader", customCode: "float customOp(vec2 uv){ float a = samplePrev(uv); float steps = max(2.0, floor(p1 + 0.5)); a = clamp(a + p2, 0.0, 1.0); return floor(a * (steps - 1.0) + 0.5) / (steps - 1.0); }", params: { p1: 4, p2: 0, p3: 0, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Steps", type: 'slider', min: 2, max: 16, step: 1 }, { key: 'p2', label: "Bias", type: 'slider', min: -1, max: 1, step: 0.01 }] },
+            DISTANCE_BANDS: { id: 109, name: "Distance Bands", cat: "FILT", customOpType: "shader", customCode: "float customOp(vec2 uv){ float a = samplePrev(uv); vec2 t = 1.0 / max(vec2(1.0), u_resolution); float sum = 0.0; float count = 0.0; for (int y = -2; y <= 2; y++) for (int x = -2; x <= 2; x++) { sum += samplePrev(uv + vec2(float(x), float(y)) * t); count += 1.0; } float avg = sum / max(1.0, count); float edge = abs(a - avg); float phase = fract(edge * max(1.0, p1) + p4); float band = smoothstep(p2, p2 + max(0.001, p3), phase) - smoothstep(p2 + p3, p2 + p3 + max(0.001, p3), phase); return clamp(band, 0.0, 1.0); }", params: { p1: 8, p2: 0.3, p3: 0.1, p4: 0.0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Frequency", type: 'slider', min: 1, max: 64, step: 1 }, { key: 'p2', label: "Band Start", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p3', label: "Band Width", type: 'slider', min: 0.01, max: 0.5, step: 0.01 }, { key: 'p4', label: "Phase", type: 'slider', min: 0, max: 1, step: 0.01 }] },
+            LIBRARY_STAMP_SCATTER: { id: 110, name: "Library Stamp/Scatter", cat: "MOD", customOpType: "shader", customCode: "float hash1(float n){ return fract(sin(n) * 43758.5453123); } float customOp(vec2 uv){ float count = clamp(floor(p1 + 0.5), 1.0, 16.0); float jitter = p2; float sMin = max(0.05, p3); float sMax = max(sMin, p4); float seed = p5 * 13.17; float outA = 0.0; for (int i = 0; i < 16; i++) { if (float(i) >= count) break; float fi = float(i) + seed; vec2 c = vec2(hash1(fi * 1.7), hash1(fi * 2.3)); c = mix(vec2(0.5), c, jitter); float s = mix(sMin, sMax, hash1(fi * 3.1)); vec2 suv = (uv - c) / s + 0.5; outA = max(outA, sampleLibrary(suv)); } return outA; }", params: { p1: 8, p2: 1.0, p3: 0.2, p4: 0.8, p5: 123, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Count", type: 'slider', min: 1, max: 16, step: 1 }, { key: 'p2', label: "Jitter", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p3', label: "Scale Min", type: 'slider', min: 0.05, max: 2, step: 0.01 }, { key: 'p4', label: "Scale Max", type: 'slider', min: 0.05, max: 2, step: 0.01 }, { key: 'p5', label: "Seed", type: 'slider', min: 0, max: 9999, step: 1 }] },
+            LIBRARY_DISPLACE: { id: 111, name: "Library Displace", cat: "MOD", customOpType: "shader", customCode: "float customOp(vec2 uv){ vec2 p = uv * max(0.001, p2) + vec2(p3 * 0.01, p3 * 0.03); float ax = sampleLibrary(p + vec2(0.13, 0.37)); float ay = sampleLibrary(p + vec2(0.71, 0.19)); vec2 d = (vec2(ax, ay) - 0.5) * 2.0 * p1 * 0.2; return samplePrev(uv + d); }", params: { p1: 0.35, p2: 3.0, p3: 123, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Strength", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p2', label: "Scale", type: 'slider', min: 0, max: 10, step: 0.1 }, { key: 'p3', label: "Seed", type: 'slider', min: 0, max: 9999, step: 1 }] }
+        };
+
+        const STEP_MENU_GROUPS = [
+            { label: "GENERATORS", keys: ['BASE_SHAPE', 'BASE_GRAD'] },
+            { label: "NOISE / ERODE", keys: ['NOISE_PERLIN', 'NOISE_WORLEY'] },
+            { label: "FILTERS", keys: ['THRESHOLD', 'MORPH_DILATE_ERODE', 'MORPH_OPEN_CLOSE', 'EDGE_SOBEL', 'OUTLINE_ALPHA', 'POSTERIZE_ALPHA', 'DISTANCE_BANDS'] },
+            { label: "MODIFIERS", keys: ['FRACTAL', 'SPIRAL', 'VIGNETTE', 'SMEAR', 'DOMAIN_WARP', 'RADIAL_WARP', 'KALEIDOSCOPE_PLUS', 'LIBRARY_STAMP_SCATTER', 'LIBRARY_DISPLACE'] },
+            { label: "UTILITY", keys: ['BASIC'] }
+        ];
+
+        const OPERATION_EXPLANATIONS = {
+            BASE_SHAPE: "Creates a base alpha shape (filled or wireframe circle/square/triangle).",
+            BASE_GRAD: "Creates a directional gradient alpha mask using angle.",
+            NOISE_PERLIN: "Applies smooth fractal Perlin noise for organic breakup.",
+            NOISE_WORLEY: "Applies cellular/Worley noise for chunky or crack-like breakup.",
+            THRESHOLD: "Converts soft alpha into hard black/white regions at a cutoff.",
+            FRACTAL: "Repeats radial wedges to create kaleidoscope/fractal symmetry.",
+            SPIRAL: "Warps source alpha around a center point with spiral twist.",
+            VIGNETTE: "Fades edges inward with circular or square falloff.",
+            BASIC: "Pass-through utility step for notes or simple pipeline placeholders.",
+            SMEAR: "Directional blur/smear sampled along an angle and strength.",
+            DOMAIN_WARP: "Warps alpha sampling coordinates using procedural noise vectors.",
+            RADIAL_WARP: "Applies twirl, pinch, or bulge radial transform to alpha.",
+            KALEIDOSCOPE_PLUS: "Mirrors angular wedges for kaleidoscope symmetry.",
+            MORPH_DILATE_ERODE: "Expands or shrinks alpha regions by neighborhood sampling.",
+            MORPH_OPEN_CLOSE: "Smooths or fills alpha masks using morphology passes.",
+            EDGE_SOBEL: "Extracts edge alpha from gradient magnitude.",
+            OUTLINE_ALPHA: "Creates inner/outer outlines from alpha boundaries.",
+            POSTERIZE_ALPHA: "Quantizes alpha into discrete stepped levels.",
+            DISTANCE_BANDS: "Builds contour-like alpha bands from local distance cues.",
+            LIBRARY_STAMP_SCATTER: "Scatters repeated alpha stamps with randomized placement/scale.",
+            LIBRARY_DISPLACE: "Displaces alpha sampling based on alpha-derived vectors."
+        };
+
+        const DEFAULT_CUSTOM_GLSL = `float customOp(vec2 uv) {
+    vec2 p = uv - 0.5;
+    float d = length(p);
+    return 1.0 - smoothstep(0.2, 0.45, d);
+}`;
+
+        const DEFAULT_CUSTOM_JS = `// Return alpha from 0.0 to 1.0
+const cx = 0.5;
+const cy = 0.5;
+const dx = uvx - cx;
+const dy = uvy - cy;
+const d = Math.sqrt(dx * dx + dy * dy);
+return Math.max(0, Math.min(1, 1 - d * 2.2));`;
+
+        const MAX_GENERATION_WORKERS = 5;
+        const MAX_PACKAGING_WORKERS = 5;
+        const MAX_DELETE_HISTORY = 10;
+        const FILTER_MODULE_KEYS = ['NOISE_PERLIN', 'NOISE_WORLEY', 'THRESHOLD', 'FRACTAL', 'SPIRAL', 'SMEAR', 'VIGNETTE', 'DOMAIN_WARP', 'RADIAL_WARP', 'KALEIDOSCOPE_PLUS', 'MORPH_DILATE_ERODE', 'MORPH_OPEN_CLOSE', 'EDGE_SOBEL', 'OUTLINE_ALPHA', 'POSTERIZE_ALPHA', 'DISTANCE_BANDS', 'LIBRARY_STAMP_SCATTER', 'LIBRARY_DISPLACE'];
+        const TEXTURE_DB_NAME = 'alphacarve-texture-cache';
+        const TEXTURE_DB_STORE = 'textures';
+        const META_KEY_LIBRARY = 'alphacarve-meta-library-v1';
+        const META_KEY_CUSTOM_OPS = 'alphacarve-meta-custom-ops-v1';
+        const META_KEY_FILTER_MODULES = 'alphacarve-meta-filter-modules-v1';
+        const META_KEY_QUALITY_FILTERS = 'alphacarve-meta-quality-filters-v1';
+        const META_KEY_DREAM_PARAMS = 'alphacarve-meta-dream-params-v1';
+
+        const getDefaultBlendForCategory = (cat) => {
+            if (cat === 'GEN') return 0;
+            if (cat === 'ERODE') return 1;
+            return 2;
+        };
+
+        const createDefaultFilterModules = () => FILTER_MODULE_KEYS.map((key, idx) => {
+            const td = STEP_TYPES[key];
+            return {
+                id: `fm-${key}-${idx}`,
+                key,
+                enabled: false,
+                expanded: false,
+                blendMode: getDefaultBlendForCategory(td.cat),
+                params: { ...td.params },
+                universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 }
+            };
+        });
+
+        let textureDbPromise = null;
+        const getTextureDb = () => {
+            if (textureDbPromise) return textureDbPromise;
+            textureDbPromise = new Promise((resolve, reject) => {
+                const req = indexedDB.open(TEXTURE_DB_NAME, 1);
+                req.onupgradeneeded = () => {
+                    const db = req.result;
+                    if (!db.objectStoreNames.contains(TEXTURE_DB_STORE)) {
+                        db.createObjectStore(TEXTURE_DB_STORE);
+                    }
+                };
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+            return textureDbPromise;
+        };
+
+        const storeTextureBlob = async (key, blob) => {
+            const db = await getTextureDb();
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(TEXTURE_DB_STORE, 'readwrite');
+                tx.objectStore(TEXTURE_DB_STORE).put(blob, key);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        };
+
+        const loadTextureBlob = async (key) => {
+            const db = await getTextureDb();
+            return await new Promise((resolve, reject) => {
+                const tx = db.transaction(TEXTURE_DB_STORE, 'readonly');
+                const req = tx.objectStore(TEXTURE_DB_STORE).get(key);
+                req.onsuccess = () => resolve(req.result || null);
+                req.onerror = () => reject(req.error);
+            });
+        };
+
+        const deleteTextureBlob = async (key) => {
+            const db = await getTextureDb();
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(TEXTURE_DB_STORE, 'readwrite');
+                tx.objectStore(TEXTURE_DB_STORE).delete(key);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        };
+
+        const dataUrlToBlob = async (dataUrl) => {
+            const res = await fetch(dataUrl);
+            return await res.blob();
+        };
+
+        const formatBytes = (bytes) => {
+            if (!bytes || bytes <= 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+            const value = bytes / Math.pow(1024, i);
+            return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+        };
+
+        const clamp01 = (value) => Math.max(0, Math.min(1, value));
+
+        const computeAlphaHash = (pixels, width, height) => {
+            const small = 8;
+            const sampled = [];
+            let total = 0;
+            for (let sy = 0; sy < small; sy++) {
+                for (let sx = 0; sx < small; sx++) {
+                    const x = Math.min(width - 1, Math.floor((sx / (small - 1)) * (width - 1)));
+                    const y = Math.min(height - 1, Math.floor((sy / (small - 1)) * (height - 1)));
+                    const idx = (y * width + x) * 4 + 3;
+                    const value = pixels[idx];
+                    sampled.push(value);
+                    total += value;
+                }
+            }
+            const avg = total / sampled.length;
+            return sampled.map(v => (v >= avg ? '1' : '0')).join('');
+        };
+
+        const hammingDistance = (a, b) => {
+            if (!a || !b) return 64;
+            const len = Math.min(a.length, b.length);
+            let diff = Math.abs(a.length - b.length);
+            for (let i = 0; i < len; i++) if (a[i] !== b[i]) diff++;
+            return diff;
+        };
+
+	        class TextureEngine {
+	            constructor(width, height) {
+	                this.width = width; this.height = height; this.canvas = document.createElement('canvas'); this.canvas.width = width; this.canvas.height = height;
+	                this.gl = this.canvas.getContext('webgl', { preserveDrawingBuffer: true, alpha: true });
+	                if (!this.gl) return;
+	                this.program = this.createProgram(VS_SOURCE, FS_TEMPLATE); this.fbos = [this.createFBO(), this.createFBO()]; this.stepTextures = []; this.quad = this.createQuad(); this.customPrograms = {};
+	            }
+            createShader(type, source) { const shader = this.gl.createShader(type); this.gl.shaderSource(shader, source); this.gl.compileShader(shader); return this.gl.getShaderParameter(shader, this.gl.COMPILE_STATUS) ? shader : null; }
+            createProgram(vs, fs) { const program = this.gl.createProgram(); const vShader = this.createShader(this.gl.VERTEX_SHADER, vs); const fShader = this.createShader(this.gl.FRAGMENT_SHADER, fs); this.gl.attachShader(program, vShader); this.gl.attachShader(program, fShader); this.gl.linkProgram(program); return this.gl.getProgramParameter(program, this.gl.LINK_STATUS) ? program : null; }
+            createQuad() { const buffer = this.gl.createBuffer(); this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer); const verts = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]); this.gl.bufferData(this.gl.ARRAY_BUFFER, verts, this.gl.STATIC_DRAW); return buffer; }
+            createFBO() { const texture = this.gl.createTexture(); this.gl.bindTexture(this.gl.TEXTURE_2D, texture); this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.width, this.height, 0, this.gl.RGBA, this.gl.UNSIGNED_BYTE, null); this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR); this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE); this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE); const fbo = this.gl.createFramebuffer(); this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, fbo); this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, texture, 0); this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null); return { fbo, texture }; }
+            getCustomProgram(customCode) {
+                if (this.customPrograms[customCode]) return this.customPrograms[customCode];
+	                const fs = `precision mediump float;
+	varying vec2 vUv;
+	uniform sampler2D u_prevTexture;
+	uniform sampler2D u_libraryTexture;
+	uniform vec2 u_resolution;
+	uniform int u_blendMode;
+uniform float p1;
+uniform float p2;
+uniform float p3;
+uniform float p4;
+uniform float p5;
+uniform float p6;
+uniform float p7;
+uniform float u_power;
+uniform float u_mult;
+uniform float u_scale;
+	uniform float u_offsetX;
+	uniform float u_offsetY;
+	uniform float u_hasPrevF;
+	uniform float u_hasLibraryF;
+	float samplePrev(vec2 uv){ if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0; return texture2D(u_prevTexture, uv).a; }
+	float sampleLibrary(vec2 uv){ if (u_hasLibraryF < 0.5) return samplePrev(uv); if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0; return texture2D(u_libraryTexture, uv).a; }
+	${customCode}
+void main() {
+    float prevAlpha = texture2D(u_prevTexture, vUv).a;
+    if (u_hasPrevF < 0.5) prevAlpha = 0.0;
+    vec2 uv = (vUv - 0.5) / max(0.001, u_scale) + 0.5 - vec2(u_offsetX, u_offsetY);
+    float currentAlpha = clamp(customOp(uv), 0.0, 1.0);
+    currentAlpha = clamp(pow(currentAlpha, u_power) * u_mult, 0.0, 1.0);
+    float finalAlpha = prevAlpha;
+    if (u_blendMode == 0) finalAlpha = currentAlpha;
+    else if (u_blendMode == 1) finalAlpha = max(0.0, prevAlpha - currentAlpha);
+    else if (u_blendMode == 2) finalAlpha = prevAlpha * currentAlpha;
+    else if (u_blendMode == 3) finalAlpha = min(1.0, prevAlpha + currentAlpha);
+    else if (u_blendMode == 4) finalAlpha = max(prevAlpha, currentAlpha);
+    else if (u_blendMode == 5) finalAlpha = min(prevAlpha, currentAlpha);
+    gl_FragColor = vec4(1.0, 1.0, 1.0, finalAlpha);
+}`;
+	                const program = this.createProgram(VS_SOURCE, fs);
+	                this.customPrograms[customCode] = program;
+	                return program;
+	            }
+	            setLibrarySourceTexture(librarySource) {
+	                const gl = this.gl;
+	                if (!gl) return false;
+	                if (!librarySource) return false;
+	                if (!this.libraryTexture) {
+	                    this.libraryTexture = gl.createTexture();
+	                    gl.bindTexture(gl.TEXTURE_2D, this.libraryTexture);
+	                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+	                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+	                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+	                }
+	                gl.activeTexture(gl.TEXTURE1);
+	                gl.bindTexture(gl.TEXTURE_2D, this.libraryTexture);
+	                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+	                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, librarySource);
+	                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+	                return true;
+	            }
+	            renderStack(steps, options = {}) {
+	                const gl = this.gl; gl.useProgram(this.program); const attLoc = gl.getAttribLocation(this.program, "position"); gl.enableVertexAttribArray(attLoc); gl.bindBuffer(gl.ARRAY_BUFFER, this.quad); gl.vertexAttribPointer(attLoc, 2, gl.FLOAT, false, 0, 0);
+	                const hasLibrarySource = this.setLibrarySourceTexture(options.librarySource);
+	                const locs = { u_prevTexture: gl.getUniformLocation(this.program, "u_prevTexture"), u_resolution: gl.getUniformLocation(this.program, "u_resolution"), u_stepType: gl.getUniformLocation(this.program, "u_stepType"), u_blendMode: gl.getUniformLocation(this.program, "u_blendMode"), p1: gl.getUniformLocation(this.program, "p1"), p2: gl.getUniformLocation(this.program, "p2"), p3: gl.getUniformLocation(this.program, "p3"), p4: gl.getUniformLocation(this.program, "p4"), p5: gl.getUniformLocation(this.program, "p5"), p6: gl.getUniformLocation(this.program, "p6"), p7: gl.getUniformLocation(this.program, "p7"), u_power: gl.getUniformLocation(this.program, "u_power"), u_mult: gl.getUniformLocation(this.program, "u_mult"), u_scale: gl.getUniformLocation(this.program, "u_scale"), u_offsetX: gl.getUniformLocation(this.program, "u_offsetX"), u_offsetY: gl.getUniformLocation(this.program, "u_offsetY"), u_hasPrev: gl.getUniformLocation(this.program, "u_hasPrev") };
+	                gl.uniform2f(locs.u_resolution, this.width, this.height);
+                let prevTex = null; if (this.stepTextures.length < steps.length) { for (let i = this.stepTextures.length; i < steps.length; i++) this.stepTextures.push(this.createFBO()); }
+                steps.forEach((step, index) => {
+                    const dest = this.stepTextures[index]; gl.bindFramebuffer(gl.FRAMEBUFFER, dest.fbo); gl.viewport(0, 0, this.width, this.height); gl.clear(gl.COLOR_BUFFER_BIT);
+                    const customOpType = step.customOpType || step.typeDef.customOpType;
+                    const customCode = step.customCode || step.typeDef.customCode;
+                    if (customOpType === 'shader' && customCode) {
+                        const customProgram = this.getCustomProgram(customCode);
+                        if (customProgram) {
+                            gl.useProgram(customProgram);
+                            const customAttLoc = gl.getAttribLocation(customProgram, "position");
+                            gl.enableVertexAttribArray(customAttLoc);
+                            gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
+                            gl.vertexAttribPointer(customAttLoc, 2, gl.FLOAT, false, 0, 0);
+                            const customLocs = {
+                                u_prevTexture: gl.getUniformLocation(customProgram, "u_prevTexture"),
+                                u_resolution: gl.getUniformLocation(customProgram, "u_resolution"),
+                                u_blendMode: gl.getUniformLocation(customProgram, "u_blendMode"),
+                                p1: gl.getUniformLocation(customProgram, "p1"),
+                                p2: gl.getUniformLocation(customProgram, "p2"),
+                                p3: gl.getUniformLocation(customProgram, "p3"),
+                                p4: gl.getUniformLocation(customProgram, "p4"),
+                                p5: gl.getUniformLocation(customProgram, "p5"),
+                                p6: gl.getUniformLocation(customProgram, "p6"),
+                                p7: gl.getUniformLocation(customProgram, "p7"),
+                                u_power: gl.getUniformLocation(customProgram, "u_power"),
+	                                u_mult: gl.getUniformLocation(customProgram, "u_mult"),
+	                                u_scale: gl.getUniformLocation(customProgram, "u_scale"),
+	                                u_offsetX: gl.getUniformLocation(customProgram, "u_offsetX"),
+	                                u_offsetY: gl.getUniformLocation(customProgram, "u_offsetY"),
+	                                u_hasPrevF: gl.getUniformLocation(customProgram, "u_hasPrevF"),
+	                                u_libraryTexture: gl.getUniformLocation(customProgram, "u_libraryTexture"),
+	                                u_hasLibraryF: gl.getUniformLocation(customProgram, "u_hasLibraryF")
+	                            };
+	                            gl.activeTexture(gl.TEXTURE0);
+	                            gl.bindTexture(gl.TEXTURE_2D, prevTex);
+	                            gl.uniform1i(customLocs.u_prevTexture, 0);
+	                            gl.activeTexture(gl.TEXTURE1);
+	                            gl.bindTexture(gl.TEXTURE_2D, this.libraryTexture || null);
+	                            gl.uniform1i(customLocs.u_libraryTexture, 1);
+	                            gl.uniform1f(customLocs.u_hasLibraryF, hasLibrarySource ? 1.0 : 0.0);
+	                            gl.uniform1f(customLocs.u_hasPrevF, prevTex ? 1.0 : 0.0);
+	                            gl.uniform2f(customLocs.u_resolution, this.width, this.height);
+                            gl.uniform1i(customLocs.u_blendMode, step.blendMode);
+                            gl.uniform1f(customLocs.p1, step.params.p1);
+                            gl.uniform1f(customLocs.p2, step.params.p2);
+                            gl.uniform1f(customLocs.p3, step.params.p3);
+                            gl.uniform1f(customLocs.p4, step.params.p4);
+                            gl.uniform1f(customLocs.p5, step.params.p5);
+                            gl.uniform1f(customLocs.p6, step.params.p6 || 0);
+                            gl.uniform1f(customLocs.p7, step.params.p7 || 0);
+                            gl.uniform1f(customLocs.u_power, step.universal.power);
+                            gl.uniform1f(customLocs.u_mult, step.universal.mult);
+                            gl.uniform1f(customLocs.u_scale, step.universal.scale);
+                            gl.uniform1f(customLocs.u_offsetX, step.universal.offsetX || 0.0);
+                            gl.uniform1f(customLocs.u_offsetY, step.universal.offsetY || 0.0);
+                            gl.drawArrays(gl.TRIANGLES, 0, 6);
+                            prevTex = dest.texture;
+                            gl.useProgram(this.program);
+                            gl.enableVertexAttribArray(attLoc);
+                            gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
+                            gl.vertexAttribPointer(attLoc, 2, gl.FLOAT, false, 0, 0);
+                            return;
+                        }
+                    }
+                    if (!step.active) { if (!prevTex) { gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); } else { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, prevTex); gl.uniform1i(locs.u_prevTexture, 0); gl.uniform1i(locs.u_hasPrev, 1); gl.uniform1i(locs.u_stepType, 999); gl.uniform1i(locs.u_blendMode, 1); } }
+                    else { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, prevTex); gl.uniform1i(locs.u_prevTexture, 0); gl.uniform1i(locs.u_hasPrev, prevTex ? 1 : 0); gl.uniform1i(locs.u_stepType, step.typeDef.id); gl.uniform1i(locs.u_blendMode, step.blendMode); gl.uniform1f(locs.p1, step.params.p1); gl.uniform1f(locs.p2, step.params.p2); gl.uniform1f(locs.p3, step.params.p3); gl.uniform1f(locs.p4, step.params.p4); gl.uniform1f(locs.p5, step.params.p5); gl.uniform1f(locs.p6, step.params.p6 || 0); gl.uniform1f(locs.p7, step.params.p7 || 0); gl.uniform1f(locs.u_power, step.universal.power); gl.uniform1f(locs.u_mult, step.universal.mult); gl.uniform1f(locs.u_scale, step.universal.scale); gl.uniform1f(locs.u_offsetX, step.universal.offsetX || 0.0); gl.uniform1f(locs.u_offsetY, step.universal.offsetY || 0.0); }
+                    gl.drawArrays(gl.TRIANGLES, 0, 6); prevTex = dest.texture;
+                });
+	                gl.bindFramebuffer(gl.FRAMEBUFFER, null); return this.stepTextures.slice(0, steps.length);
+	            }
+	            getTextureCanvas(textureIndex) {
+	                const fbo = this.stepTextures[textureIndex].fbo;
+	                const gl = this.gl;
+	                gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+	                const pixels = new Uint8Array(this.width * this.height * 4);
+	                gl.readPixels(0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+	                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+	                const canvas = document.createElement('canvas');
+	                canvas.width = this.width;
+	                canvas.height = this.height;
+	                const ctx = canvas.getContext('2d');
+	                const imageData = ctx.createImageData(this.width, this.height);
+	                for (let y = 0; y < this.height; y++) {
+	                    for (let x = 0; x < this.width; x++) {
+	                        const sourceIdx = (y * this.width + x) * 4;
+	                        const destIdx = ((this.height - 1 - y) * this.width + x) * 4;
+	                        const alpha = pixels[sourceIdx + 3];
+	                        imageData.data[destIdx] = 255;
+	                        imageData.data[destIdx + 1] = 255;
+	                        imageData.data[destIdx + 2] = 255;
+	                        imageData.data[destIdx + 3] = alpha;
+	                    }
+	                }
+	                ctx.putImageData(imageData, 0, 0);
+	                return canvas;
+	            }
+	            getTextureUrl(textureIndex) {
+	                const fbo = this.stepTextures[textureIndex].fbo; const gl = this.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); const pixels = new Uint8Array(this.width * this.height * 4); gl.readPixels(0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+	                const tC = document.createElement('canvas'); tC.width = this.width; tC.height = this.height; const ctx = tC.getContext('2d'); const iD = ctx.createImageData(this.width, this.height);
+	                for (let y = 0; y < this.height; y++) { for (let x = 0; x < this.width; x++) { const si = (y * this.width + x) * 4; const di = ((this.height - 1 - y) * this.width + x) * 4; const alpha = pixels[si + 3]; iD.data[di] = 255; iD.data[di + 1] = 255; iD.data[di + 2] = 255; iD.data[di + 3] = alpha; } }
+	                ctx.putImageData(iD, 0, 0); return tC.toDataURL();
+	            }
+	            async getTextureBlob(textureIndex, mimeType = 'image/png', quality) {
+	                const fbo = this.stepTextures[textureIndex].fbo;
+	                const gl = this.gl;
+	                gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+	                const pixels = new Uint8Array(this.width * this.height * 4);
+	                gl.readPixels(0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+	                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+	                const tC = document.createElement('canvas');
+	                tC.width = this.width;
+	                tC.height = this.height;
+	                const ctx = tC.getContext('2d');
+	                const iD = ctx.createImageData(this.width, this.height);
+	                for (let y = 0; y < this.height; y++) {
+	                    for (let x = 0; x < this.width; x++) {
+	                        const si = (y * this.width + x) * 4;
+	                        const di = ((this.height - 1 - y) * this.width + x) * 4;
+	                        const alpha = pixels[si + 3];
+	                        iD.data[di] = 255;
+	                        iD.data[di + 1] = 255;
+	                        iD.data[di + 2] = 255;
+	                        iD.data[di + 3] = alpha;
+	                    }
+	                }
+	                ctx.putImageData(iD, 0, 0);
+
+	                return await new Promise((resolve) => {
+	                    tC.toBlob((blob) => resolve(blob || new Blob()), mimeType, quality);
+	                });
+	            }
+	            analyzeTexture(textureIndex) {
+	                const fbo = this.stepTextures[textureIndex].fbo; const gl = this.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); const pixels = new Uint8Array(this.width * this.height * 4); gl.readPixels(0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+	                const alphaMask = new Uint8Array(this.width * this.height);
+	                let tA = 0; let tG = 0; let gC = 0; let area = 0; let perimeter = 0; let minX = this.width; let minY = this.height; let maxX = -1; let maxY = -1;
+	                for (let i = 0; i < pixels.length; i += 4) {
+                    const a = pixels[i + 3];
+                    if (a > 10) tA += a;
+                    const pixelIndex = i / 4;
+                    const x = pixelIndex % this.width;
+                    const y = Math.floor(pixelIndex / this.width);
+                    const solid = a >= 127 ? 1 : 0;
+                    alphaMask[pixelIndex] = solid;
+                    if (solid) {
+                        area++;
+                        if (x < minX) minX = x;
+                        if (y < minY) minY = y;
+                        if (x > maxX) maxX = x;
+                        if (y > maxY) maxY = y;
+                    }
+                    if (x < this.width - 1 && y < this.height - 1) {
+                        const r = pixels[i + 4 + 3];
+                        const d = pixels[i + this.width * 4 + 3];
+                        tG += Math.abs(a - r) + Math.abs(a - d);
+                        gC++;
+                    }
+                }
+
+                for (let y = 0; y < this.height; y++) {
+                    for (let x = 0; x < this.width; x++) {
+                        const idx = y * this.width + x;
+                        if (!alphaMask[idx]) continue;
+                        const left = x > 0 ? alphaMask[idx - 1] : 0;
+                        const right = x < this.width - 1 ? alphaMask[idx + 1] : 0;
+                        const up = y > 0 ? alphaMask[idx - this.width] : 0;
+                        const down = y < this.height - 1 ? alphaMask[idx + this.width] : 0;
+                        perimeter += (left ? 0 : 1) + (right ? 0 : 1) + (up ? 0 : 1) + (down ? 0 : 1);
+                    }
+                }
+
+                const density = (tA / (this.width * this.height)) / 255.0;
+                const aG = tG / (gC || 1);
+                const sScore = Math.max(0, 1.0 - (aG / 40.0));
+                const circularity = area > 0 && perimeter > 0 ? clamp01((4.0 * Math.PI * area) / (perimeter * perimeter)) : 0;
+                const bboxW = maxX >= minX ? (maxX - minX + 1) : 0;
+                const bboxH = maxY >= minY ? (maxY - minY + 1) : 0;
+                const bboxArea = bboxW * bboxH;
+                const fillRatio = bboxArea > 0 ? area / bboxArea : 0;
+                const aspectRatio = bboxH > 0 ? bboxW / bboxH : 0;
+                const aspectScore = aspectRatio > 0 ? clamp01(1.0 - Math.abs(1.0 - aspectRatio)) : 0;
+                const squareness = clamp01(fillRatio * aspectScore);
+                const hash = computeAlphaHash(pixels, this.width, this.height);
+                return { density, sScore, circularity, squareness, hash };
+            }
+        }
+
+        // ==========================================
+        // 3. UI HELPERS & COMPONENTS (Hoisted)
+        // ==========================================
+
+        function generateSemanticName(item, existingNames) {
+            const config = item.config;
+            let shape = "Blob"; const baseStep = config.find(s => s.typeDef.cat === 'GEN');
+            if (baseStep) {
+                const t = Math.round(baseStep.params.p1);
+                if (t === 0) shape = "Circle"; else if (t === 1) shape = "Square"; else if (t === 2) shape = "Triangle"; else if (t === 3) shape = "Ring"; else if (t === 4) shape = "Frame"; else if (t === 5) shape = "TriFrame";
+            }
+            let variant = "Standard";
+            if (config.some(s => s.typeDef.id === 12)) variant = "Fractal"; else if (config.some(s => s.typeDef.id === 13)) variant = "Swirl"; else if (config.some(s => s.typeDef.id === 16)) variant = "Streak";
+            let coreName = `${shape}_${variant}`;
+            let counter = 1; let finalName = `${coreName}_${counter.toString().padStart(2, '0')}`;
+            while (existingNames.has(finalName)) { counter++; finalName = `${coreName}_${counter.toString().padStart(2, '0')}`; }
+            return finalName;
+        }
+
+        function GizmoOverlayComp({ step }) {
+            if (!step.active) return null; const id = step.typeDef.id; const p = step.params; const scale = step.universal.scale !== undefined ? step.universal.scale : 1.0; const offX = step.universal.offsetX || 0.0; const offY = step.universal.offsetY || 0.0;
+            const centerX = 50 + (offX * scale * 100); const centerY = 50 - (offY * scale * 100);
+            let gizmo = null;
+            if (id === 1) { const type = p.p1; const sz = p.p2 * scale; if (type == 0 || type == 3) gizmo = <circle cx={centerX} cy={centerY} r={sz * 50} fill="none" stroke="yellow" strokeWidth="1" strokeDasharray="4 2" />; else if (type == 1 || type == 4) gizmo = <rect x={centerX - sz * 50} y={centerY - sz * 50} width={sz * 100} height={sz * 100} fill="none" stroke="yellow" strokeWidth="1" strokeDasharray="4 2" />; }
+            return <svg className="absolute inset-0 w-full h-full pointer-events-none z-10" viewBox="0 0 100 100" preserveAspectRatio="none">{gizmo}</svg>;
+        }
+
+        function TextureItemFlip({ item, onClick, onSave, onDelete, engine, isRejected, rejectLabel, flipFrames }) {
+            const [frames, setFrames] = useState([]); const [fi, setFi] = useState(0); const [isH, setIsH] = useState(false); const [isL, setIsL] = useState(false); const [storedUrl, setStoredUrl] = useState(item.url || null); const hT = useRef(null); const aI = useRef(null);
+            const fmtScore = (value) => (typeof value === 'number' && !Number.isNaN(value) ? value.toFixed(2) : '--');
+            useEffect(() => {
+                let revokedUrl = null;
+                let cancelled = false;
+                (async () => {
+                    if (!item?.storageKey) {
+                        setStoredUrl(item?.url || null);
+                        return;
+                    }
+                    try {
+                        const blob = await loadTextureBlob(item.storageKey);
+                        if (!blob || cancelled) return;
+                        const objectUrl = URL.createObjectURL(blob);
+                        revokedUrl = objectUrl;
+                        setStoredUrl(objectUrl);
+                    } catch (_) {
+                        if (!cancelled) setStoredUrl(item?.url || null);
+                    }
+                })();
+                return () => {
+                    cancelled = true;
+                    if (revokedUrl) URL.revokeObjectURL(revokedUrl);
+                };
+            }, [item?.storageKey, item?.url]);
+            const hME = () => { if (isRejected) return; setIsH(true); if (frames.length > 0) return; hT.current = setTimeout(async () => { if (!engine) return; setIsL(true); const generated = []; const base = JSON.parse(JSON.stringify(item.config)); const total = flipFrames || 16; for (let i = 0; i < total; i++) { const ph = (i / total) * Math.PI * 2; const cfg = base.map((s, idx) => { if (idx === 0 || idx === base.length - 1) return s; const isN = s.typeDef.cat === 'ERODE'; const nP = { ...s.params }; if (isN) { nP.p6 = (s.params.p6 || 0) + Math.cos(ph + idx) * 0.5; nP.p7 = (s.params.p7 || 0) + Math.sin(ph + idx) * 0.5; } else if (s.typeDef.id === 13) nP.p1 = Math.max(0, Math.min(2, s.params.p1 + Math.sin(ph) * 0.2)); else if (s.typeDef.id === 12) nP.p1 = Math.max(1, Math.min(16, s.params.p1 + Math.round(Math.sin(ph) * 1.5))); return { ...s, params: nP, universal: { ...s.universal, mult: s.universal.mult + Math.sin(ph + idx) * 0.05, scale: s.universal.scale + Math.cos(ph + idx) * 0.02 } }; }); engine.renderStack(cfg); generated.push(engine.getTextureUrl(cfg.length - 1)); } setFrames(generated); setIsL(false); }, 1500); };
+            const hML = () => { setIsH(false); if (hT.current) clearTimeout(hT.current); setFi(0); };
+            useEffect(() => { if (isH && frames.length > 0) { aI.current = setInterval(() => { setFi(p => (p + 1) % frames.length); }, 1000 / frames.length); } else { if (aI.current) clearInterval(aI.current); setFi(0); } return () => { if (aI.current) clearInterval(aI.current); }; }, [isH, frames]);
+            const dU = (isH && frames.length > 0) ? frames[fi] : (storedUrl || item.url);
+            return (
+                <div className={`relative aspect-square bg-[#000] checkerboard border border-gray-800 rounded overflow-hidden group dream-item-enter ${isRejected ? 'opacity-50' : 'hover:border-purple-500'}`} onMouseEnter={hME} onMouseLeave={hML}>
+                    <img src={dU} className={`w-full h-full object-contain transition-opacity ${isRejected ? 'opacity-20 blur-sm' : ''}`} />
+                    {isL && (<div className="absolute top-2 right-2"><div className="w-3 h-3 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div></div>)}
+                    {isRejected && <div className="absolute inset-0 flex flex-col items-center justify-center font-bold text-red-500"><span className="text-4xl">✕</span><span className="text-xs bg-black px-1">{rejectLabel}</span></div>}
+                    {!isRejected && (<>
+                        <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                            <div className="bg-black/80 border border-gray-700 rounded px-2 py-1 text-[9px] font-mono text-gray-200 leading-tight">
+                                <div>alpha: {fmtScore(item.density)}</div>
+                                <div>simple: {fmtScore(item.sScore)}</div>
+                                <div>circle: {fmtScore(item.circularity)}</div>
+                                <div>square: {fmtScore(item.squareness)}</div>
+                            </div>
+                        </div>
+                        <div className="absolute bottom-0 inset-x-0 bg-black/80 p-1 text-[9px] text-gray-300 truncate text-center font-mono py-1.5">{item.name}</div>
+                        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {onClick && <button onClick={() => onClick(item.config)} className="w-6 h-6 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Edit">✎</button>}
+                            {onSave && <button onClick={() => onSave(item)} className="w-6 h-6 bg-green-600 hover:bg-green-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Save">💾</button>}
+                            {onDelete && <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="w-6 h-6 bg-gray-600 hover:bg-gray-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Delete">🗑</button>}
+                        </div>
+                    </>)}
+                </div>
+            );
+        }
+
+        function VirtualizedTextureItem(props) {
+            const hostRef = useRef(null);
+            const [isVisible, setIsVisible] = useState(false);
+
+            useEffect(() => {
+                const el = hostRef.current;
+                if (!el) return;
+                if (!('IntersectionObserver' in window)) {
+                    setIsVisible(true);
+                    return;
+                }
+
+                const observer = new IntersectionObserver(
+                    (entries) => {
+                        const entry = entries[0];
+                        setIsVisible(entry.isIntersecting);
+                    },
+                    { root: null, rootMargin: '400px', threshold: 0.01 }
+                );
+                observer.observe(el);
+                return () => observer.disconnect();
+            }, []);
+
+            return (
+                <div ref={hostRef}>
+                    {isVisible ? (
+                        <TextureItemFlip {...props} />
+                    ) : (
+                        <div className="relative aspect-square bg-[#000] checkerboard border border-gray-900 rounded overflow-hidden">
+                            <div className="absolute inset-0 bg-black/10"></div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function AddMenu({ onAdd, variant, customShaderOps = [] }) {
+            const [isOpen, setIsOpen] = useState(false); const menuRef = useRef(null);
+            useEffect(() => { const hCO = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setIsOpen(false); }; if (isOpen) document.addEventListener("mousedown", hCO); return () => document.removeEventListener("mousedown", hCO); }, [isOpen]);
+            return (
+                <div className={`relative ${variant === 'large' ? 'w-full' : 'flex justify-center py-2'}`} ref={menuRef}>
+                    <button onClick={() => setIsOpen(!isOpen)} className={variant === 'large' ? "w-full py-4 border-2 border-dashed border-gray-700 hover:border-gray-500 hover:bg-[#222] text-gray-500 hover:text-white rounded-lg font-bold transition-all text-sm cursor-pointer" : "w-6 h-6 rounded-full bg-gray-700 hover:bg-blue-500 text-white flex items-center justify-center text-xs shadow-sm z-10 font-bold"}>+</button>
+                    {isOpen && (
+                        <div className="absolute z-50 bg-[#222] border border-gray-700 shadow-xl rounded w-56 overflow-hidden left-1/2 -translate-x-1/2 top-full mt-1 max-h-72 overflow-y-auto">
+                            {STEP_MENU_GROUPS.map(g => (
+                                <div key={g.label}>
+                                    <div className="px-3 py-2 text-[10px] text-gray-500 font-bold bg-[#1a1a1a] border-b border-gray-800">{g.label}</div>
+                                    {g.keys.map(k => (<button key={k} onClick={() => { onAdd(k); setIsOpen(false); }} className="block w-full text-left px-4 py-2 hover:bg-blue-900 text-gray-300 text-xs border-b border-gray-800 last:border-0">{STEP_TYPES[k].name}</button>))}
+                                </div>
+                            ))}
+                            {customShaderOps.length > 0 && (
+                                <div>
+                                    <div className="px-3 py-2 text-[10px] text-gray-500 font-bold bg-[#1a1a1a] border-b border-gray-800">CUSTOM SHADERS</div>
+                                    {customShaderOps.map(op => (
+                                        <button key={op.id} onClick={() => { onAdd(`CUSTOM_OP::${op.id}`); setIsOpen(false); }} className="block w-full text-left px-4 py-2 hover:bg-blue-900 text-gray-300 text-xs border-b border-gray-800 last:border-0">{op.title || 'Untitled Shader Operation'}</button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function StepCard({ step, index, total, onUpdate, onToggle, onRemove, onMove, showGizmos }) {
+            const td = step.typeDef; const isF = index === 0; const isB = td.id === 15;
+            const hPC = (k, v) => onUpdate(step.id, { params: { ...step.params, [k]: parseFloat(v) } });
+            const hUC = (k, v) => onUpdate(step.id, { universal: { ...step.universal, [k]: parseFloat(v) } });
+            return (
+                <div className={`transition-all duration-300 border-l-4 bg-[#2a2a2a] mb-2 ${step.active ? 'border-blue-500' : 'border-gray-600 h-[50px] opacity-60 overflow-hidden'}`}>
+                    <div className="flex items-center justify-between p-2 bg-[#252525]">
+                        <div className="flex items-center gap-3"><div className="font-bold text-sm text-gray-300 font-mono">{index + 1}. {td.name.toUpperCase()}</div></div>
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => onToggle(step.id)} className={`text-xs px-2 py-1 rounded font-bold ${step.active ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-400'}`}>{step.active ? 'ON' : 'OFF'}</button>
+                            {!isF && <button onClick={() => onRemove(step.id)} className="text-gray-500 hover:text-red-500 px-2">✕</button>}
+                            <div className="flex flex-col ml-2">
+                                {index > 0 && <button onClick={() => onMove(index, -1)} className="text-xs hover:text-white text-gray-500">▲</button>}
+                                {index < total - 1 && <button onClick={() => onMove(index, 1)} className="text-xs hover:text-white text-gray-500">▼</button>}
+                            </div>
+                        </div>
+                    </div>
+                    {step.active && (
+                        <div className="flex p-2 gap-4">
+                            <div className="w-[128px] h-[128px] shrink-0 border border-gray-700 bg-[#111] checkerboard relative group overflow-hidden">
+                                {step.previewUrl && <img src={step.previewUrl} className="w-full h-full object-contain" />}
+                                {showGizmos && <GizmoOverlayComp step={step} />}
+                            </div>
+                            <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
+                                <div className="space-y-3">
+                                    {!isB && <div className="flex flex-col gap-1"><label className="text-gray-400">Blend Mode</label><select value={step.blendMode} onChange={(e) => onUpdate(step.id, { blendMode: parseInt(e.target.value) })} className="bg-[#333] border border-gray-600 rounded p-1 text-white" disabled={isF}>{BLEND_MODES.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>}
+                                    {isB ? <textarea className="w-full h-32 bg-[#333] border border-gray-600 rounded p-2 text-gray-300 text-xs resize-none" value={step.note || ""} onChange={(e) => onUpdate(step.id, { note: e.target.value })} /> : td.controls.map(c => <div key={c.key} className="flex flex-col gap-1"><div className="flex justify-between"><label className="text-gray-400">{c.label}</label><span>{step.params[c.key]}</span></div>{c.type === 'slider' ? <input type="range" min={c.min} max={c.max} step={c.step} value={step.params[c.key]} onChange={(e) => hPC(c.key, e.target.value)} className="w-full slider-thumb" /> : <select value={step.params[c.key]} onChange={(e) => hPC(c.key, e.target.value)} className="bg-[#333] border border-gray-600 rounded p-1 text-white w-full">{c.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</div>)}
+                                </div>
+                                <div className="space-y-3 border-l border-gray-700 pl-4">
+                                    <div className="text-gray-500 font-bold mb-1 uppercase text-[10px]">Global</div>
+                                    <div className="flex flex-col gap-1"><div className="flex justify-between"><label className="text-gray-400">Mult</label><span>{step.universal.mult}</span></div><input type="range" min="0" max="5" step="0.05" value={step.universal.mult} onChange={(e) => hUC('mult', e.target.value)} className="w-full slider-thumb" /></div>
+                                    <div className="flex flex-col gap-1"><div className="flex justify-between"><label className="text-gray-400">Scale</label><span>{step.universal.scale}</span></div><input type="range" min="0" max="2" step="0.01" value={step.universal.scale} onChange={(e) => hUC('scale', e.target.value)} className="w-full slider-thumb" /></div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function BuilderTab({ bVM, uiVM, customOpsVM }) {
+            const [isMasterPreviewCollapsed, setIsMasterPreviewCollapsed] = useState(true);
+            const customShaderOps = (customOpsVM?.items || []).filter(op => op.type === 'shader');
+            return (
+                <div className="flex flex-col h-full">
+                    <div className="h-10 bg-[#111] flex items-center justify-between px-4 border-b border-gray-800"><div className="font-bold text-gray-500 text-xs uppercase tracking-tighter">Workbench</div><label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={uiVM.showGizmos} onChange={(e) => uiVM.setShowGizmos(e.target.checked)} className="accent-blue-500" /><span className="text-xs text-gray-400 font-bold">GUIDES</span></label></div>
+                    <div className="flex-1 overflow-y-auto ladder-scroll p-4 bg-[#1a1a1a]">
+                        {bVM.steps.map((s, i) => <React.Fragment key={s.id}><StepCard step={s} index={i} total={bVM.steps.length} onUpdate={bVM.updateStep} onToggle={bVM.toggleStep} onRemove={bVM.removeStep} onMove={bVM.moveStep} showGizmos={uiVM.showGizmos} />{i < bVM.steps.length - 1 && <AddMenu variant="interstitial" onAdd={(k) => bVM.addStep(k, i + 1)} customShaderOps={customShaderOps} />}</React.Fragment>)}
+                        <AddMenu variant="large" onAdd={(k) => bVM.addStep(k, -1)} customShaderOps={customShaderOps} />
+                    </div>
+                    <div className={`bg-[#151515] border-t border-gray-700 shrink-0 ${isMasterPreviewCollapsed ? 'h-[48px]' : 'h-[280px] p-4'}`}>
+                        <button onClick={() => setIsMasterPreviewCollapsed(p => !p)} className="w-full h-12 flex items-center justify-between px-4 text-white font-bold uppercase text-xs">
+                            <span>Master Preview</span>
+                            <span className="text-gray-400 text-sm">{isMasterPreviewCollapsed ? '▶' : '▼'}</span>
+                        </button>
+                        {!isMasterPreviewCollapsed && (
+                            <div className="flex-1 flex items-center justify-center gap-8">
+                                <div className="relative w-[200px] h-[200px] bg-[#111] checkerboard border border-gray-600 shadow-2xl">{bVM.finalPreviewUrl && <img src={bVM.finalPreviewUrl} className="absolute inset-0 w-full h-full object-contain" />}<div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30"><div className="w-full h-px bg-red-500"></div><div className="h-full w-px bg-red-500 absolute"></div></div></div>
+                                <div className="flex flex-col gap-2">
+                                    <input value={bVM.profileName} onChange={(e) => bVM.setProfileName(e.target.value)} className="bg-[#333] border border-gray-600 px-2 py-1 rounded text-white text-xs font-mono mb-4" />
+                                    <div className="flex gap-1 mb-2">{[256, 512, 1024, 2048].map(r => <button key={r} onClick={() => bVM.toggleRes(r)} className={`px-2 py-1 text-[10px] rounded border font-bold ${bVM.selectedRes.includes(r) ? 'bg-blue-600 text-white border-blue-500' : 'bg-[#333] text-gray-400 border-gray-600'}`}>{r}</button>)}</div>
+                                    <button onClick={bVM.onExport} className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded shadow-lg text-sm uppercase">Export ZIP</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function GeneratorTab({ dVM, libVM, previewEngine }) {
+            const [showC, setShowC] = useState(true);
+            const results = dVM.state.results || [];
+            const liveStart = Math.max(0, results.length - 24);
+            return (
+                <div className="flex flex-col h-full bg-[#0a0a0a] relative">
+                    <div className="p-4 border-b border-gray-800 bg-[#151515] z-30 shadow-2xl">
+                        <div className="flex justify-between items-center mb-4"><h2 className="text-2xl font-bold text-white tracking-wider font-mono uppercase"><span className="text-purple-500">✦</span> Dream Engine</h2><button onClick={() => setShowC(!showC)} className="px-3 py-1 border border-gray-700 rounded text-[10px] font-bold text-gray-400">CONFIG {showC ? '▲' : '▼'}</button></div>
+	                        {showC && (
+	                            <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 mb-4 grid grid-cols-3 gap-8 overflow-x-auto config-scroll">
+	                                <div className="space-y-3">
+	                                    <div className="text-purple-400 font-bold uppercase text-[10px]">Batching</div>
+	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Batch Size</span><span>{dVM.params.batchSize}</span></div><input type="range" min="1" max="100" step="1" value={dVM.params.batchSize} onChange={(e) => dVM.setParams(p => ({ ...p, batchSize: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
+	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Cycles</span><span>{dVM.params.batchCycles}</span></div><input type="range" min="1" max="50" step="1" value={dVM.params.batchCycles} onChange={(e) => dVM.setParams(p => ({ ...p, batchCycles: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
+	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Gen Workers</span><span>{dVM.params.generationWorkers}</span></div><input type="range" min="1" max="5" step="1" value={dVM.params.generationWorkers} onChange={(e) => dVM.setParams(p => ({ ...p, generationWorkers: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
+	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Pack Workers</span><span>{dVM.params.packagingWorkers}</span></div><input type="range" min="1" max="5" step="1" value={dVM.params.packagingWorkers} onChange={(e) => dVM.setParams(p => ({ ...p, packagingWorkers: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
+	                                </div>
+	                                <div className="space-y-3">
+	                                    <div className="text-blue-400 font-bold uppercase text-[10px]">Complexity Range</div>
+	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Min Steps</span><span>{dVM.params.minComplexity}</span></div><input type="range" min="1" max="10" step="1" value={dVM.params.minComplexity} onChange={(e) => dVM.setParams(p => ({ ...p, minComplexity: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
+	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Max Steps</span><span>{dVM.params.maxComplexity}</span></div><input type="range" min="1" max="10" step="1" value={dVM.params.maxComplexity} onChange={(e) => dVM.setParams(p => ({ ...p, maxComplexity: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
+	                                </div>
+                                <div className="space-y-3">
+                                    <div className="text-orange-400 font-bold uppercase text-[10px]">Playback</div>
+                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400 text-[10px]"><span>Preview Frames</span><span>{dVM.params.flipFrames}</span></div><input type="range" min="4" max="16" step="4" value={dVM.params.flipFrames} onChange={(e) => dVM.setParams(p => ({ ...p, flipFrames: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
+                                </div>
+                            </div>
+                        )}
+                        <input type="text" value={dVM.params.prompt || ""} onChange={(e) => dVM.setParams(p => ({ ...p, prompt: e.target.value }))} placeholder="Filter description..." className="w-full bg-[#0a0a0a] border border-gray-700 rounded px-4 py-2 text-sm text-white focus:border-purple-500 outline-none" />
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 pb-48 relative">
+                        {dVM.isDreaming && <div className="fixed top-24 left-1/2 -translate-x-1/2 bg-black/90 px-6 py-2 rounded-full border border-purple-500 text-purple-400 text-xs font-mono animate-pulse z-40 shadow-2xl">{dVM.state.phase} | attempts: {dVM.state.pendingAttempts || 0} | accepted: {dVM.state.pendingAccepted || 0} | rejected: {dVM.state.pendingRejected || 0}</div>}
+                        <div className="grid grid-cols-6 gap-4">{results.map((it, idx) => idx >= liveStart ? <TextureItemFlip key={it.id} item={it} engine={previewEngine} flipFrames={dVM.params.flipFrames} onDelete={() => dVM.onDeleteResult(it.id)} onSave={libVM.onSave} onClick={libVM.onLoad} /> : <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} flipFrames={dVM.params.flipFrames} onDelete={() => dVM.onDeleteResult(it.id)} onSave={libVM.onSave} onClick={libVM.onLoad} />)}</div>
+                    </div>
+                    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-4">
+                        <div className="bg-black/80 backdrop-blur-md px-6 py-2 rounded-full border border-gray-800 flex items-center gap-4 shadow-xl pointer-events-auto">
+                            <label className="flex items-center cursor-pointer select-none">
+                                <div className="relative">
+                                    <input type="checkbox" checked={dVM.params.autoDream} onChange={(e) => dVM.setParams(p => ({ ...p, autoDream: e.target.checked }))} className="sr-only" />
+                                    <div className={`w-10 h-5 rounded-full transition-colors ${dVM.params.autoDream ? 'bg-blue-600' : 'bg-gray-700'}`}></div>
+                                    <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${dVM.params.autoDream ? 'translate-x-5' : ''}`}></div>
+                                </div>
+                                <span className="ml-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Auto Dream</span>
+                            </label>
+                        </div>
+                        <button onClick={dVM.onDream} disabled={dVM.isDreaming} className={`h-16 px-12 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold tracking-[0.2em] shadow-2xl border border-blue-400/30 transition-all pointer-events-auto ${dVM.isDreaming ? 'opacity-50 cursor-wait' : ''}`}>{dVM.isDreaming ? 'DREAMING...' : 'START DREAM'}</button>
+                    </div>
+                </div>
+            );
+        }
+
+        function FiltersTab({ filtersVM }) {
+            const modules = filtersVM.modules || [];
+            const quality = filtersVM.quality || {};
+            return (
+                <div className="flex flex-col h-full bg-[#111] p-6">
+                    <div className="mb-4">
+                        <h2 className="text-xl font-bold text-white">FILTERS</h2>
+                        <p className="text-xs text-gray-400 mt-1">Configure acceptance gates and operation modules used during generation.</p>
+                    </div>
+                    <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                        <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Acceptance Filters</div>
+                        <div className="bg-[#1a1a1a] border border-gray-800 rounded overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-2 bg-[#202020]">
+                                <button onClick={() => filtersVM.toggleQualityExpanded('alpha')} className="text-sm font-bold text-white">Alpha Overall</button>
+                                <div className="flex items-center gap-2">
+                                    <button onClick={() => filtersVM.toggleQualityEnabled('alpha')} className={`text-[10px] px-2 py-1 rounded font-bold ${quality.alpha?.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{quality.alpha?.enabled ? 'ON' : 'OFF'}</button>
+                                    <button onClick={() => filtersVM.toggleQualityExpanded('alpha')} className="text-xs text-gray-400 w-6">{quality.alpha?.expanded ? '▼' : '▶'}</button>
+                                </div>
+                            </div>
+                            {quality.alpha?.expanded && (
+                                <div className="p-3 text-xs space-y-3">
+                                    <div className="flex justify-between"><span className="text-gray-400">Min Alpha Density</span><span>{quality.alpha.min.toFixed(2)}</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.alpha.min} onChange={(e) => filtersVM.updateQuality('alpha', 'min', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                    <div className="flex justify-between"><span className="text-gray-400">Max Alpha Density</span><span>{quality.alpha.max.toFixed(2)}</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.alpha.max} onChange={(e) => filtersVM.updateQuality('alpha', 'max', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                </div>
+                            )}
+                        </div>
+                        <div className="bg-[#1a1a1a] border border-gray-800 rounded overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-2 bg-[#202020]">
+                                <button onClick={() => filtersVM.toggleQualityExpanded('similarity')} className="text-sm font-bold text-white">Similarity To Previous</button>
+                                <div className="flex items-center gap-2">
+                                    <button onClick={() => filtersVM.toggleQualityEnabled('similarity')} className={`text-[10px] px-2 py-1 rounded font-bold ${quality.similarity?.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{quality.similarity?.enabled ? 'ON' : 'OFF'}</button>
+                                    <button onClick={() => filtersVM.toggleQualityExpanded('similarity')} className="text-xs text-gray-400 w-6">{quality.similarity?.expanded ? '▼' : '▶'}</button>
+                                </div>
+                            </div>
+                            {quality.similarity?.expanded && (
+                                <div className="p-3 text-xs space-y-3">
+                                    <div className="flex justify-between"><span className="text-gray-400">Max Similarity</span><span>{quality.similarity.maxSimilarity.toFixed(2)}</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.similarity.maxSimilarity} onChange={(e) => filtersVM.updateQuality('similarity', 'maxSimilarity', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                    <div className="flex justify-between"><span className="text-gray-400">History Size</span><span>{quality.similarity.historySize}</span></div>
+                                    <input type="range" min="10" max="500" step="10" value={quality.similarity.historySize} onChange={(e) => filtersVM.updateQuality('similarity', 'historySize', parseInt(e.target.value))} className="w-full slider-thumb" />
+                                </div>
+                            )}
+                        </div>
+                        <div className="bg-[#1a1a1a] border border-gray-800 rounded overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-2 bg-[#202020]">
+                                <button onClick={() => filtersVM.toggleQualityExpanded('shape')} className="text-sm font-bold text-white">Shape Bias (Circle / Square)</button>
+                                <div className="flex items-center gap-2">
+                                    <button onClick={() => filtersVM.toggleQualityEnabled('shape')} className={`text-[10px] px-2 py-1 rounded font-bold ${quality.shape?.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{quality.shape?.enabled ? 'ON' : 'OFF'}</button>
+                                    <button onClick={() => filtersVM.toggleQualityExpanded('shape')} className="text-xs text-gray-400 w-6">{quality.shape?.expanded ? '▼' : '▶'}</button>
+                                </div>
+                            </div>
+                            {quality.shape?.expanded && (
+                                <div className="p-3 text-xs space-y-3">
+                                    <div className="flex justify-between"><span className="text-gray-400">Min Circularity</span><span>{quality.shape.minCircularity.toFixed(2)}</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.shape.minCircularity} onChange={(e) => filtersVM.updateQuality('shape', 'minCircularity', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                    <div className="flex justify-between"><span className="text-gray-400">Max Circularity</span><span>{quality.shape.maxCircularity.toFixed(2)}</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.shape.maxCircularity} onChange={(e) => filtersVM.updateQuality('shape', 'maxCircularity', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                    <div className="flex justify-between"><span className="text-gray-400">Min Squareness</span><span>{quality.shape.minSquareness.toFixed(2)}</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.shape.minSquareness} onChange={(e) => filtersVM.updateQuality('shape', 'minSquareness', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                    <div className="flex justify-between"><span className="text-gray-400">Max Squareness</span><span>{quality.shape.maxSquareness.toFixed(2)}</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.shape.maxSquareness} onChange={(e) => filtersVM.updateQuality('shape', 'maxSquareness', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                </div>
+                            )}
+                        </div>
+                        <div className="bg-[#1a1a1a] border border-gray-800 rounded overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-2 bg-[#202020]">
+                                <button onClick={() => filtersVM.toggleQualityExpanded('simplicity')} className="text-sm font-bold text-white">Simplicity / Smoothness</button>
+                                <div className="flex items-center gap-2">
+                                    <button onClick={() => filtersVM.toggleQualityEnabled('simplicity')} className={`text-[10px] px-2 py-1 rounded font-bold ${quality.simplicity?.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{quality.simplicity?.enabled ? 'ON' : 'OFF'}</button>
+                                    <button onClick={() => filtersVM.toggleQualityExpanded('simplicity')} className="text-xs text-gray-400 w-6">{quality.simplicity?.expanded ? '▼' : '▶'}</button>
+                                </div>
+                            </div>
+                            {quality.simplicity?.expanded && (
+                                <div className="p-3 text-xs space-y-3">
+                                    <div className="flex justify-between"><span className="text-gray-400">Min Simplicity</span><span>{quality.simplicity.min.toFixed(2)}</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.simplicity.min} onChange={(e) => filtersVM.updateQuality('simplicity', 'min', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                    <div className="flex justify-between"><span className="text-gray-400">Max Simplicity</span><span>{quality.simplicity.max.toFixed(2)}</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.simplicity.max} onChange={(e) => filtersVM.updateQuality('simplicity', 'max', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold pt-3">Operation Modules</div>
+                        {modules.map((m, idx) => {
+                            const td = STEP_TYPES[m.key];
+                            return (
+                                <div key={m.id} className="bg-[#1a1a1a] border border-gray-800 rounded overflow-hidden">
+                                    <div className="flex items-center justify-between px-3 py-2 bg-[#202020]">
+                                        <button onClick={() => filtersVM.toggleExpanded(m.id)} className="flex items-center gap-3 text-left">
+                                            <span className="text-xs text-gray-500 w-6">{idx + 1}.</span>
+                                            <span className="text-sm font-bold text-white">{td.name}</span>
+                                            <span className="text-[10px] px-2 py-0.5 rounded bg-[#2a2a2a] text-gray-400">{td.cat}</span>
+                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={() => filtersVM.move(m.id, -1)} disabled={idx === 0} className={`text-xs px-2 py-1 rounded ${idx === 0 ? 'bg-[#2a2a2a] text-gray-600' : 'bg-[#2f2f2f] text-gray-300 hover:bg-[#3b3b3b]'}`}>▲</button>
+                                            <button onClick={() => filtersVM.move(m.id, 1)} disabled={idx === modules.length - 1} className={`text-xs px-2 py-1 rounded ${idx === modules.length - 1 ? 'bg-[#2a2a2a] text-gray-600' : 'bg-[#2f2f2f] text-gray-300 hover:bg-[#3b3b3b]'}`}>▼</button>
+                                            <button onClick={() => filtersVM.toggleEnabled(m.id)} className={`text-[10px] px-2 py-1 rounded font-bold ${m.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{m.enabled ? 'ON' : 'OFF'}</button>
+                                            <button onClick={() => filtersVM.toggleExpanded(m.id)} className="text-xs text-gray-400 w-6">{m.expanded ? '▼' : '▶'}</button>
+                                        </div>
+                                    </div>
+                                    {m.expanded && (
+                                        <div className="p-3 grid grid-cols-2 gap-4 text-xs">
+                                            <div className="space-y-3">
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="text-gray-400">Blend Mode</label>
+                                                    <select value={m.blendMode} onChange={(e) => filtersVM.updateBlend(m.id, parseInt(e.target.value))} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
+                                                        {BLEND_MODES.map(mode => <option key={mode.id} value={mode.id}>{mode.name}</option>)}
+                                                    </select>
+                                                </div>
+                                                {td.controls.map(c => (
+                                                    <div key={c.key} className="flex flex-col gap-1">
+                                                        <div className="flex justify-between">
+                                                            <label className="text-gray-400">{c.label}</label>
+                                                            <span>{m.params[c.key]}</span>
+                                                        </div>
+                                                        {c.type === 'slider' ? (
+                                                            <input type="range" min={c.min} max={c.max} step={c.step} value={m.params[c.key]} onChange={(e) => filtersVM.updateParam(m.id, c.key, parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                                        ) : (
+                                                            <select value={m.params[c.key]} onChange={(e) => filtersVM.updateParam(m.id, c.key, parseFloat(e.target.value))} className="bg-[#333] border border-gray-600 rounded p-1 text-white w-full">
+                                                                {c.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                                            </select>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="space-y-3 border-l border-gray-700 pl-4">
+                                                <div className="text-gray-500 font-bold mb-1 uppercase text-[10px]">Global</div>
+                                                <div className="flex flex-col gap-1">
+                                                    <div className="flex justify-between"><label className="text-gray-400">Mult</label><span>{m.universal.mult}</span></div>
+                                                    <input type="range" min="0" max="5" step="0.05" value={m.universal.mult} onChange={(e) => filtersVM.updateUniversal(m.id, 'mult', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <div className="flex justify-between"><label className="text-gray-400">Scale</label><span>{m.universal.scale}</span></div>
+                                                    <input type="range" min="0" max="2" step="0.01" value={m.universal.scale} onChange={(e) => filtersVM.updateUniversal(m.id, 'scale', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <div className="flex justify-between"><label className="text-gray-400">Power</label><span>{m.universal.power}</span></div>
+                                                    <input type="range" min="0" max="4" step="0.05" value={m.universal.power} onChange={(e) => filtersVM.updateUniversal(m.id, 'power', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        }
+
+        function LibraryTab({ libVM, previewEngine }) {
+            return (
+                <div className="flex flex-col h-full bg-[#111] p-6">
+                    <div className="mb-6">
+                        <h2 className="text-xl font-bold text-white">LIBRARY</h2>
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                        <div className="grid grid-cols-8 gap-4">
+                            {libVM.items.map((it) => <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} />)}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function SetsTab({ libVM, previewEngine }) {
+            return (
+                <div className="flex flex-col h-full bg-[#111] p-6">
+                    <div className="mb-6">
+                        <h2 className="text-xl font-bold text-white">SETS</h2>
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                        <div className="space-y-8">{libVM.sets.map(set => (
+                            <div key={set.id} className="bg-[#1a1a1a] p-4 rounded-xl border border-gray-800">
+                                <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                                    <EditableSetName set={set} libVM={libVM} />
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => libVM.deleteSet(set)} disabled={libVM.exportingSetId !== null} className={`text-[10px] px-3 py-1.5 rounded font-bold transition-colors ${libVM.exportingSetId !== null ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-200'}`}>
+                                            DELETE SET
+                                        </button>
+                                        <button onClick={() => libVM.exportSet(set)} disabled={libVM.exportingSetId !== null} className={`text-[10px] px-3 py-1.5 rounded font-bold transition-colors ${libVM.exportingSetId === set.id ? 'bg-gray-600 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}>
+                                            {libVM.exportingSetId === set.id ? 'PACKING...' : '⬇ DOWNLOAD FULL SET'}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-10 gap-2">
+                                    {set.items.map((it) => <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} />)}
+                                </div>
+                            </div>
+                        ))}</div>
+                    </div>
+                </div>
+            );
+        }
+
+        function OperationsTab({ customOpsVM }) {
+            const customOps = Array.isArray(customOpsVM?.items) ? customOpsVM.items : [];
+            const [blendOpen, setBlendOpen] = useState(false);
+            const operationRows = Object.entries(STEP_TYPES).map(([key, def]) => ({
+                key,
+                name: def.name,
+                category: def.cat,
+                description: OPERATION_EXPLANATIONS[key] || "No description available."
+            }));
+
+            return (
+                <div className="flex flex-col h-full bg-[#111] p-6">
+                    <div className="mb-6">
+                        <h2 className="text-xl font-bold text-white">OPERATIONS</h2>
+                        <p className="text-xs text-gray-400 mt-1">Reference for each built-in operation and blend mode behavior.</p>
+                    </div>
+
+                    <div className="mb-6 bg-[#1a1a1a] border border-gray-800 rounded">
+                        <button onClick={() => setBlendOpen(v => !v)} className="w-full px-3 py-2 text-left flex items-center justify-between">
+                            <span className="text-sm font-bold text-gray-300">Blend Modes</span>
+                            <span className="text-xs text-gray-500">{blendOpen ? '▲' : '▼'}</span>
+                        </button>
+                        {blendOpen && (
+                            <div className="grid grid-cols-1 gap-2 text-xs p-3 pt-0">
+                                <div className="bg-[#111] border border-gray-800 rounded px-3 py-2"><span className="font-bold text-white">Overwrite:</span> replace previous alpha with current step output.</div>
+                                <div className="bg-[#111] border border-gray-800 rounded px-3 py-2"><span className="font-bold text-white">Subtract:</span> remove current alpha from previous output.</div>
+                                <div className="bg-[#111] border border-gray-800 rounded px-3 py-2"><span className="font-bold text-white">Multiply:</span> keep only overlapping alpha.</div>
+                                <div className="bg-[#111] border border-gray-800 rounded px-3 py-2"><span className="font-bold text-white">Add:</span> combine alphas and clamp at full.</div>
+                                <div className="bg-[#111] border border-gray-800 rounded px-3 py-2"><span className="font-bold text-white">Max (Lighten):</span> keep stronger alpha per pixel.</div>
+                                <div className="bg-[#111] border border-gray-800 rounded px-3 py-2"><span className="font-bold text-white">Min (Darken):</span> keep weaker alpha per pixel.</div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto">
+                        <h3 className="text-sm font-bold text-gray-300 mb-2">Step Operations</h3>
+                        <div className="space-y-2">
+                            {operationRows.map((row) => (
+                                <div key={row.key} className="bg-[#1a1a1a] border border-gray-800 rounded px-3 py-3">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-white font-bold text-sm">{row.name}</span>
+                                        <span className="text-[10px] px-2 py-0.5 rounded bg-[#2a2a2a] text-gray-400">{row.category}</span>
+                                    </div>
+                                    <div className="text-xs text-gray-400">{row.description}</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <h3 className="text-sm font-bold text-gray-300 mt-6 mb-2">Custom Operations</h3>
+                        {customOps.length === 0 && <div className="text-xs text-gray-500">No custom operations yet. Add from the Editor tab.</div>}
+                        <div className="space-y-2">
+                            {customOps.map((op) => (
+                                <div key={op.id} className="bg-[#1a1a1a] border border-gray-800 rounded px-3 py-3">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-white font-bold text-sm">{op.title || 'Untitled Custom Operation'}</span>
+                                        <span className="text-[10px] px-2 py-0.5 rounded bg-[#2a2a2a] text-gray-400">{op.type === 'shader' ? 'CUSTOM SHADER' : 'CUSTOM JS'}</span>
+                                    </div>
+                                    <div className="text-xs text-gray-400">{op.description || 'No description provided.'}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function EditorTab({ customOpsVM }) {
+            const customOps = Array.isArray(customOpsVM?.items) ? customOpsVM.items : [];
+            const addCustomOp = typeof customOpsVM?.add === 'function' ? customOpsVM.add : () => { };
+            const [shaderCode, setShaderCode] = useState(DEFAULT_CUSTOM_GLSL);
+            const [shaderStatus, setShaderStatus] = useState('Idle');
+            const [shaderTitle, setShaderTitle] = useState('Custom Shader Operation');
+            const [shaderDescription, setShaderDescription] = useState('');
+            const [selectedShaderOpId, setSelectedShaderOpId] = useState('');
+            const [jsCode, setJsCode] = useState(DEFAULT_CUSTOM_JS);
+            const [jsStatus, setJsStatus] = useState('Idle');
+            const [jsTitle, setJsTitle] = useState('Custom Performance Operation');
+            const [jsDescription, setJsDescription] = useState('');
+            const [selectedJsOpId, setSelectedJsOpId] = useState('');
+            const shaderCanvasRef = useRef(null);
+            const jsCanvasRef = useRef(null);
+            const shaderOps = customOps.filter(op => op.type === 'shader');
+            const jsOps = customOps.filter(op => op.type === 'js');
+
+            const runShaderTest = useCallback(() => {
+                const canvas = shaderCanvasRef.current;
+                if (!canvas) return;
+                const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, alpha: false });
+                if (!gl) {
+                    setShaderStatus('WebGL unavailable');
+                    return;
+                }
+
+                const vsSource = `attribute vec2 position; varying vec2 vUv; void main() { vUv = position * 0.5 + 0.5; gl_Position = vec4(position, 0.0, 1.0); }`;
+                const fsSource = `precision mediump float;
+varying vec2 vUv;
+${shaderCode}
+void main() {
+    float a = clamp(customOp(vUv), 0.0, 1.0);
+    gl_FragColor = vec4(1.0, 1.0, 1.0, a);
+}`;
+
+                const compileShader = (type, source) => {
+                    const shader = gl.createShader(type);
+                    gl.shaderSource(shader, source);
+                    gl.compileShader(shader);
+                    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                        const err = gl.getShaderInfoLog(shader) || 'Shader compile failed';
+                        gl.deleteShader(shader);
+                        throw new Error(err);
+                    }
+                    return shader;
+                };
+
+                try {
+                    const vertex = compileShader(gl.VERTEX_SHADER, vsSource);
+                    const fragment = compileShader(gl.FRAGMENT_SHADER, fsSource);
+                    const program = gl.createProgram();
+                    gl.attachShader(program, vertex);
+                    gl.attachShader(program, fragment);
+                    gl.linkProgram(program);
+                    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                        const err = gl.getProgramInfoLog(program) || 'Program link failed';
+                        throw new Error(err);
+                    }
+
+                    const buffer = gl.createBuffer();
+                    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+                    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+
+                    gl.useProgram(program);
+                    const pos = gl.getAttribLocation(program, 'position');
+                    gl.enableVertexAttribArray(pos);
+                    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+                    gl.viewport(0, 0, canvas.width, canvas.height);
+                    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+                    gl.deleteBuffer(buffer);
+                    gl.deleteProgram(program);
+                    gl.deleteShader(vertex);
+                    gl.deleteShader(fragment);
+                    setShaderStatus('Compiled and rendered');
+                } catch (err) {
+                    setShaderStatus(`Shader error: ${String(err.message || err).slice(0, 180)}`);
+                }
+            }, [shaderCode]);
+
+            const runJsPerfTest = useCallback(() => {
+                const canvas = jsCanvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                const width = canvas.width;
+                const height = canvas.height;
+                const image = ctx.createImageData(width, height);
+                const started = performance.now();
+
+                try {
+                    const perfFn = new Function('x', 'y', 'uvx', 'uvy', 'w', 'h', jsCode);
+                    for (let y = 0; y < height; y++) {
+                        for (let x = 0; x < width; x++) {
+                            const uvx = x / (width - 1);
+                            const uvy = y / (height - 1);
+                            const result = perfFn(x, y, uvx, uvy, width, height);
+                            const alpha = Math.max(0, Math.min(1, Number(result) || 0));
+                            const v = Math.floor(alpha * 255);
+                            const idx = (y * width + x) * 4;
+                            image.data[idx] = 255;
+                            image.data[idx + 1] = 255;
+                            image.data[idx + 2] = 255;
+                            image.data[idx + 3] = v;
+                        }
+                    }
+                    ctx.putImageData(image, 0, 0);
+                    const ms = performance.now() - started;
+                    setJsStatus(`Rendered in ${ms.toFixed(2)} ms`);
+                } catch (err) {
+                    setJsStatus(`Code error: ${String(err.message || err).slice(0, 180)}`);
+                }
+            }, [jsCode]);
+
+            useEffect(() => { runShaderTest(); }, [runShaderTest]);
+            useEffect(() => { runJsPerfTest(); }, [runJsPerfTest]);
+
+            const handleSelectShaderOp = (opId) => {
+                setSelectedShaderOpId(opId);
+                const selected = shaderOps.find(op => op.id === opId);
+                if (!selected) return;
+                setShaderTitle(selected.title || '');
+                setShaderDescription(selected.description || '');
+                setShaderCode(selected.code || DEFAULT_CUSTOM_GLSL);
+            };
+
+            const handleSelectJsOp = (opId) => {
+                setSelectedJsOpId(opId);
+                const selected = jsOps.find(op => op.id === opId);
+                if (!selected) return;
+                setJsTitle(selected.title || '');
+                setJsDescription(selected.description || '');
+                setJsCode(selected.code || DEFAULT_CUSTOM_JS);
+            };
+
+            const addShaderOperation = () => {
+                const newOp = {
+                    id: `custom-shader-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    type: 'shader',
+                    title: shaderTitle.trim() || 'Untitled Shader Operation',
+                    description: shaderDescription.trim(),
+                    code: shaderCode
+                };
+                addCustomOp(newOp);
+                setSelectedShaderOpId(newOp.id);
+            };
+
+            const addJsOperation = () => {
+                const newOp = {
+                    id: `custom-js-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    type: 'js',
+                    title: jsTitle.trim() || 'Untitled Performance Operation',
+                    description: jsDescription.trim(),
+                    code: jsCode
+                };
+                addCustomOp(newOp);
+                setSelectedJsOpId(newOp.id);
+            };
+
+            return (
+                <div className="flex flex-col h-full bg-[#111] p-6">
+                    <div className="mb-6">
+                        <h2 className="text-xl font-bold text-white">EDITOR</h2>
+                        <p className="text-xs text-gray-400 mt-1">Define and test custom shader/performance operation code blocks on a square preview.</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-[#1a1a1a] border border-gray-800 rounded p-3">
+                            <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-sm font-bold text-white">Custom Shader Block (GLSL/HLSL-style)</h3>
+                                <div className="flex gap-2">
+                                    <button onClick={addShaderOperation} className="text-[10px] px-2 py-1 rounded bg-green-600 hover:bg-green-500 text-white font-bold">ADD OPERATION</button>
+                                    <button onClick={runShaderTest} className="text-[10px] px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold">TEST</button>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 gap-2 mb-2">
+                                <select value={selectedShaderOpId} onChange={(e) => handleSelectShaderOp(e.target.value)} className="bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200">
+                                    <option value="">Select custom shader operation...</option>
+                                    {shaderOps.map(op => <option key={op.id} value={op.id}>{op.title}</option>)}
+                                </select>
+                                <input value={shaderTitle} onChange={(e) => setShaderTitle(e.target.value)} placeholder="Operation Title" className="bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200" />
+                                <input value={shaderDescription} onChange={(e) => setShaderDescription(e.target.value)} placeholder="Operation Description" className="bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200" />
+                            </div>
+                            <p className="text-[10px] text-gray-500 mb-2">Define `customOp(vec2 uv)` and return alpha 0..1.</p>
+                            <textarea value={shaderCode} onChange={(e) => setShaderCode(e.target.value)} className="w-full h-40 bg-[#0f0f0f] border border-gray-700 rounded p-2 text-[11px] text-gray-200 font-mono resize-none" />
+                            <div className="mt-2 flex items-center gap-3">
+                                <canvas ref={shaderCanvasRef} width="192" height="192" className="w-32 h-32 border border-gray-700 checkerboard bg-black" />
+                                <div className="text-[10px] text-gray-400">{shaderStatus}</div>
+                            </div>
+                        </div>
+
+                        <div className="bg-[#1a1a1a] border border-gray-800 rounded p-3">
+                            <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-sm font-bold text-white">Custom Performance Code Block (JS)</h3>
+                                <div className="flex gap-2">
+                                    <button onClick={addJsOperation} className="text-[10px] px-2 py-1 rounded bg-green-600 hover:bg-green-500 text-white font-bold">ADD OPERATION</button>
+                                    <button onClick={runJsPerfTest} className="text-[10px] px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold">TEST</button>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 gap-2 mb-2">
+                                <select value={selectedJsOpId} onChange={(e) => handleSelectJsOp(e.target.value)} className="bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200">
+                                    <option value="">Select custom JS operation...</option>
+                                    {jsOps.map(op => <option key={op.id} value={op.id}>{op.title}</option>)}
+                                </select>
+                                <input value={jsTitle} onChange={(e) => setJsTitle(e.target.value)} placeholder="Operation Title" className="bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200" />
+                                <input value={jsDescription} onChange={(e) => setJsDescription(e.target.value)} placeholder="Operation Description" className="bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200" />
+                            </div>
+                            <p className="text-[10px] text-gray-500 mb-2">Return alpha 0..1 using `(x, y, uvx, uvy, w, h)`.</p>
+                            <textarea value={jsCode} onChange={(e) => setJsCode(e.target.value)} className="w-full h-40 bg-[#0f0f0f] border border-gray-700 rounded p-2 text-[11px] text-gray-200 font-mono resize-none" />
+                            <div className="mt-2 flex items-center gap-3">
+                                <canvas ref={jsCanvasRef} width="192" height="192" className="w-32 h-32 border border-gray-700 checkerboard bg-black" />
+                                <div className="text-[10px] text-gray-400">{jsStatus}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function EditableSetName({ set, libVM }) {
+            const [isE, setIsE] = useState(false); const [lN, setLN] = useState(set.name); const iR = useRef(null);
+            useEffect(() => { if (isE) iR.current?.focus(); }, [isE]);
+            const hC = () => { setIsE(false); if (lN !== set.name) libVM.renameSet(set.baseKey || set.name, lN); };
+            if (isE) return <input ref={iR} className="bg-[#333] border border-blue-500 rounded px-2 py-0.5 text-white font-bold text-sm outline-none" value={lN} onChange={(e) => setLN(e.target.value)} onBlur={hC} onKeyDown={(e) => e.key === 'Enter' && hC()} />;
+            return <h3 onClick={() => setIsE(true)} className="text-white font-bold cursor-pointer hover:text-blue-400 transition-colors group flex items-center gap-2 text-sm">{set.name} <span className="opacity-0 group-hover:opacity-100 text-[8px] bg-blue-600/30 px-1 rounded text-blue-300">EDIT</span> <span className="text-gray-500 text-xs font-normal">({set.items.length})</span></h3>;
+        }
+
+        // ==========================================
+        // 5. VIEW MODEL
+        // ==========================================
+
+	        function useAppViewModel() {
+            const [activeTab, setActiveTab] = useState('builder'); const [showGizmos, setShowGizmos] = useState(true); const [enableAI, setEnableAI] = useState(true);
+            const [erosion, setErosion] = useState(0); const [profileName, setProfileName] = useState("Texture_01");
+            const [storageUsedBytes, setStorageUsedBytes] = useState(0); const [storageQuotaBytes, setStorageQuotaBytes] = useState(0);
+            const [selectedRes, setSelectedRes] = useState([2048]);
+            const [steps, setSteps] = useState([{ id: 's1', typeDef: STEP_TYPES.BASE_SHAPE, active: true, blendMode: 0, params: STEP_TYPES.BASE_SHAPE.params, universal: { power: 1, mult: 1, scale: 1, offsetX: 0, offsetY: 0 }, previewUrl: null }]);
+            const [previewUrls, setPreviewUrls] = useState([]); const [finalPreviewUrl, setFinalPreviewUrl] = useState(null);
+	            const [customOperations, setCustomOperations] = useState([]);
+	            const [filterModules, setFilterModules] = useState(createDefaultFilterModules());
+            const [qualityFilters, setQualityFilters] = useState({
+                alpha: { enabled: true, min: 0.15, max: 0.75, expanded: true },
+                similarity: { enabled: false, maxSimilarity: 0.9, historySize: 200, expanded: false },
+                shape: { enabled: false, minCircularity: 0.2, maxCircularity: 1.0, minSquareness: 0.2, maxSquareness: 1.0, expanded: false },
+                simplicity: { enabled: true, min: 0.1, max: 0.9, expanded: false }
+            });
+	            const [dreamParams, setDreamParams] = useState({ batchSize: 20, batchCycles: 1, generationWorkers: 1, packagingWorkers: 1, refineCycles: 1, minDensity: 0.15, maxDensity: 0.75, minSimplicity: 0.1, maxSimplicity: 0.9, varianceStrictness: 0.1, randStrength: 0.5, flipFrames: 16, prompt: "", minComplexity: 1, maxComplexity: 4, autoDream: false });
+
+            const autoDreamRef = useRef(false);
+            useEffect(() => { autoDreamRef.current = dreamParams.autoDream; }, [dreamParams.autoDream]);
+
+		            const [isDreaming, setIsDreaming] = useState(false); const [dreamState, setDreamState] = useState({ results: [], rejectedIds: [], phase: '', rejectLabel: '', pendingAccepted: 0, pendingAttempts: 0, pendingRejected: 0 });
+		            const [savedLibrary, setSavedLibrary] = useState([]); const [exportingSetId, setExportingSetId] = useState(null);
+		            const [deleteHistory, setDeleteHistory] = useState([]);
+		            const eR = useRef(null); const bER = useRef(null);
+		            const generationEnginesRef = useRef([]);
+		            const hasHydratedMetaRef = useRef(false);
+		            const savedLibraryRef = useRef(savedLibrary);
+		            const dreamResultsRef = useRef(dreamState.results);
+		            const deleteHistoryRef = useRef(deleteHistory);
+
+	            useEffect(() => { eR.current = new TextureEngine(256, 256); bER.current = new TextureEngine(64, 64); }, []);
+	            useEffect(() => { if (!eR.current) return; eR.current.renderStack(steps); setPreviewUrls(steps.map((_, i) => eR.current.getTextureUrl(i))); setFinalPreviewUrl(eR.current.getTextureUrl(steps.length - 1)); }, [steps]);
+	            useEffect(() => { savedLibraryRef.current = savedLibrary; }, [savedLibrary]);
+	            useEffect(() => { dreamResultsRef.current = dreamState.results; }, [dreamState.results]);
+	            useEffect(() => { deleteHistoryRef.current = deleteHistory; }, [deleteHistory]);
+	            useEffect(() => {
+	                try {
+	                    const rawLibrary = localStorage.getItem(META_KEY_LIBRARY);
+	                    if (rawLibrary) {
+	                        const parsed = JSON.parse(rawLibrary);
+	                        if (Array.isArray(parsed)) setSavedLibrary(parsed);
+	                    }
+	                    const rawCustomOps = localStorage.getItem(META_KEY_CUSTOM_OPS);
+	                    if (rawCustomOps) {
+	                        const parsed = JSON.parse(rawCustomOps);
+	                        if (Array.isArray(parsed)) setCustomOperations(parsed);
+	                    }
+	                    const rawFilterModules = localStorage.getItem(META_KEY_FILTER_MODULES);
+	                    if (rawFilterModules) {
+	                        const parsed = JSON.parse(rawFilterModules);
+	                        if (Array.isArray(parsed)) setFilterModules(parsed);
+	                    }
+	                    const rawQuality = localStorage.getItem(META_KEY_QUALITY_FILTERS);
+	                    if (rawQuality) {
+	                        const parsed = JSON.parse(rawQuality);
+	                        if (parsed && typeof parsed === 'object') {
+	                            setQualityFilters(prev => ({
+	                                ...prev,
+	                                ...parsed,
+	                                alpha: { ...prev.alpha, ...(parsed.alpha || {}) },
+	                                similarity: { ...prev.similarity, ...(parsed.similarity || {}) },
+	                                shape: { ...prev.shape, ...(parsed.shape || {}) },
+	                                simplicity: { ...prev.simplicity, ...(parsed.simplicity || {}) }
+	                            }));
+	                        }
+	                    }
+	                    const rawDreamParams = localStorage.getItem(META_KEY_DREAM_PARAMS);
+	                    if (rawDreamParams) {
+	                        const parsed = JSON.parse(rawDreamParams);
+	                        if (parsed && typeof parsed === 'object') setDreamParams(prev => ({ ...prev, ...parsed }));
+	                    }
+	                } catch (_) { }
+	                hasHydratedMetaRef.current = true;
+	            }, []);
+	            useEffect(() => {
+	                if (!hasHydratedMetaRef.current) return;
+	                try { localStorage.setItem(META_KEY_LIBRARY, JSON.stringify(savedLibrary)); } catch (_) { }
+	            }, [savedLibrary]);
+	            useEffect(() => {
+	                if (!hasHydratedMetaRef.current) return;
+	                try { localStorage.setItem(META_KEY_CUSTOM_OPS, JSON.stringify(customOperations)); } catch (_) { }
+	            }, [customOperations]);
+	            useEffect(() => {
+	                if (!hasHydratedMetaRef.current) return;
+	                try { localStorage.setItem(META_KEY_FILTER_MODULES, JSON.stringify(filterModules)); } catch (_) { }
+	            }, [filterModules]);
+	            useEffect(() => {
+	                if (!hasHydratedMetaRef.current) return;
+	                try { localStorage.setItem(META_KEY_QUALITY_FILTERS, JSON.stringify(qualityFilters)); } catch (_) { }
+	            }, [qualityFilters]);
+	            useEffect(() => {
+	                if (!hasHydratedMetaRef.current) return;
+	                try { localStorage.setItem(META_KEY_DREAM_PARAMS, JSON.stringify(dreamParams)); } catch (_) { }
+	            }, [dreamParams]);
+
+            const sets = useMemo(() => {
+                const ts = {}; savedLibrary.forEach(it => { const p = it.name.split('_'); let k = p.slice(0, -1).join('_') || "Misc"; if (!ts[k]) ts[k] = []; ts[k].push(it); });
+                const final = []; Object.keys(ts).forEach(k => { const its = ts[k]; if (its.length <= 50) final.push({ id: k, baseKey: k, name: k, items: its }); else { for (let i = 0; i < its.length; i += 50) final.push({ id: k + i, baseKey: k, name: `${k} Vol ${Math.floor(i / 50) + 1}`, items: its.slice(i, i + 50) }); } });
+                return final;
+            }, [savedLibrary]);
+
+            const handleRenameSet = (oldKey, newName) => {
+                const normalizedOldKey = (oldKey || '').replace(/\s+Vol\s+\d+$/i, '').replace(/\s+/g, '_');
+                const newNameBase = (newName || '').trim().replace(/\s+/g, '_') || 'Set';
+                setSavedLibrary(prev => {
+                    const groupItems = prev.filter(i => i.name.split('_').slice(0, -1).join('_') === normalizedOldKey);
+                    return prev.map((item) => {
+                        const itemKey = item.name.split('_').slice(0, -1).join('_');
+                        if (itemKey !== normalizedOldKey) return item;
+                        const groupIdx = groupItems.findIndex(i => i.id === item.id);
+                        const indexStr = (groupIdx + 1).toString().padStart(2, '0');
+                        return { ...item, name: `${newNameBase}_${indexStr}` };
+                    });
+                });
+            };
+
+            const runWorkerPool = async (totalJobs, maxWorkers, jobFn) => {
+                let cursor = 0;
+                const workerCount = Math.min(maxWorkers, totalJobs);
+                const workers = Array.from({ length: workerCount }, (_, slot) => (async () => {
+                    while (true) {
+                        const jobIndex = cursor++;
+                        if (jobIndex >= totalJobs) break;
+                        await jobFn(jobIndex, slot);
+                    }
+                })());
+                await Promise.all(workers);
+            };
+
+            const buildEnabledFilterSteps = () => filterModules
+                .filter(m => m.enabled)
+                .map(m => ({
+                    id: `gf-${m.id}`,
+                    typeDef: STEP_TYPES[m.key],
+                    active: true,
+                    blendMode: m.blendMode,
+                    params: { ...m.params },
+                    universal: { ...m.universal }
+                }));
+
+            const passesQualityFilters = (analysis, recentHashes) => {
+                const alphaFilter = qualityFilters.alpha;
+                if (alphaFilter.enabled && (analysis.density < alphaFilter.min || analysis.density > alphaFilter.max)) return false;
+
+                const simplicityFilter = qualityFilters.simplicity;
+                if (simplicityFilter.enabled && (analysis.sScore < simplicityFilter.min || analysis.sScore > simplicityFilter.max)) return false;
+
+                const shapeFilter = qualityFilters.shape;
+                if (shapeFilter.enabled) {
+                    if (analysis.circularity < shapeFilter.minCircularity) return false;
+                    if (analysis.circularity > shapeFilter.maxCircularity) return false;
+                    if (analysis.squareness < shapeFilter.minSquareness) return false;
+                    if (analysis.squareness > shapeFilter.maxSquareness) return false;
+                }
+
+                const similarityFilter = qualityFilters.similarity;
+                if (similarityFilter.enabled && recentHashes.length > 0 && analysis.hash) {
+                    const compareList = recentHashes.slice(-Math.max(1, similarityFilter.historySize));
+                    let bestSimilarity = 0;
+                    for (const hash of compareList) {
+                        const distance = hammingDistance(analysis.hash, hash);
+                        const similarity = 1.0 - (distance / 64.0);
+                        if (similarity > bestSimilarity) bestSimilarity = similarity;
+                    }
+                    if (bestSimilarity > similarityFilter.maxSimilarity) return false;
+                }
+
+                return true;
+            };
+
+	            const storageKeySizesRef = useRef(new Map());
+	            const quotaEstimateTimerRef = useRef(null);
+
+	            const refreshStorageUsageFullScan = async () => {
+	                try {
+	                    const db = await getTextureDb();
+	                    const { used, sizes } = await new Promise((resolve, reject) => {
+	                        const tx = db.transaction(TEXTURE_DB_STORE, 'readonly');
+	                        const store = tx.objectStore(TEXTURE_DB_STORE);
+	                        let sum = 0;
+	                        const sizesMap = new Map();
+	                        const req = store.openCursor();
+	                        req.onsuccess = () => {
+	                            const cursor = req.result;
+	                            if (!cursor) return resolve({ used: sum, sizes: sizesMap });
+	                            const blob = cursor.value;
+	                            const size = (blob && blob.size) ? blob.size : 0;
+	                            sum += size;
+	                            sizesMap.set(cursor.key, size);
+	                            cursor.continue();
+	                        };
+	                        req.onerror = () => reject(req.error);
+	                    });
+	                    storageKeySizesRef.current = sizes;
+	                    setStorageUsedBytes(used);
+	                } catch (_) { }
+	            };
+
+	            const scheduleQuotaEstimate = () => {
+	                if (!navigator.storage?.estimate) return;
+	                if (quotaEstimateTimerRef.current) return;
+	                quotaEstimateTimerRef.current = setTimeout(async () => {
+	                    quotaEstimateTimerRef.current = null;
+	                    try {
+	                        const est = await navigator.storage.estimate();
+	                        setStorageQuotaBytes(est.quota || 0);
+	                    } catch (_) { }
+	                }, 750);
+	            };
+
+	            useEffect(() => {
+	                refreshStorageUsageFullScan();
+	                scheduleQuotaEstimate();
+	                return () => {
+	                    if (quotaEstimateTimerRef.current) clearTimeout(quotaEstimateTimerRef.current);
+	                };
+	            }, []);
+
+	            const cleanupStorageIfUnreferenced = async (storageKey, nextLibrary, nextResults) => {
+	                if (!storageKey) return;
+	                const inLibrary = nextLibrary.some(it => it.storageKey === storageKey);
+	                const inResults = nextResults.some(it => it.storageKey === storageKey);
+	                if (!inLibrary && !inResults) {
+	                    const knownSize = storageKeySizesRef.current.get(storageKey) || 0;
+	                    await deleteTextureBlob(storageKey);
+	                    if (knownSize) setStorageUsedBytes(prev => Math.max(0, prev - knownSize));
+	                    storageKeySizesRef.current.delete(storageKey);
+	                    scheduleQuotaEstimate();
+	                }
+	            };
+
+	            const cleanupDeletedEntryStorage = async (entry, retainedHistory = deleteHistoryRef.current) => {
+                if (!entry?.items?.length) return;
+                const keys = [...new Set(entry.items.map(it => it.storageKey).filter(Boolean))];
+                if (keys.length === 0) return;
+                const libraryNow = savedLibraryRef.current;
+                const resultsNow = dreamResultsRef.current;
+
+	                let deletedAny = false;
+	                for (const key of keys) {
+                    const inLibrary = libraryNow.some(it => it.storageKey === key);
+                    const inResults = resultsNow.some(it => it.storageKey === key);
+	                    const inUndoHistory = retainedHistory.some(hist => hist.items?.some(it => it.storageKey === key));
+	                    if (!inLibrary && !inResults && !inUndoHistory) {
+	                        const knownSize = storageKeySizesRef.current.get(key) || 0;
+	                        await deleteTextureBlob(key);
+	                        if (knownSize) setStorageUsedBytes(prev => Math.max(0, prev - knownSize));
+	                        storageKeySizesRef.current.delete(key);
+	                        deletedAny = true;
+	                    }
+	                }
+	                if (deletedAny) scheduleQuotaEstimate();
+	            };
+
+            const pushDeleteHistory = (entry) => {
+                setDeleteHistory(prev => {
+                    const next = [entry, ...prev];
+                    const retained = next.slice(0, MAX_DELETE_HISTORY);
+                    const dropped = next.slice(MAX_DELETE_HISTORY);
+                    if (dropped.length > 0) {
+                        setTimeout(() => {
+                            dropped.forEach(item => { cleanupDeletedEntryStorage(item, retained); });
+                        }, 0);
+                    }
+                    return retained;
+                });
+            };
+
+            const undoDelete = useCallback(() => {
+                setDeleteHistory(prev => {
+                    if (!prev.length) return prev;
+                    const [latest, ...rest] = prev;
+                    if (latest?.items?.length) {
+                        setSavedLibrary(cur => {
+                            const existingIds = new Set(cur.map(it => it.id));
+                            const addBack = latest.items.filter(it => !existingIds.has(it.id));
+                            return [...addBack, ...cur];
+                        });
+                    }
+                    return rest;
+                });
+            }, []);
+
+            useEffect(() => {
+                const onKeyDown = (e) => {
+                    const activeEl = document.activeElement;
+                    const isTypingContext = activeEl && (
+                        activeEl.tagName === 'INPUT' ||
+                        activeEl.tagName === 'TEXTAREA' ||
+                        activeEl.isContentEditable
+                    );
+                    if (isTypingContext) return;
+                    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+                        if (deleteHistoryRef.current.length > 0) {
+                            e.preventDefault();
+                            undoDelete();
+                        }
+                    }
+                };
+                window.addEventListener('keydown', onKeyDown);
+                return () => window.removeEventListener('keydown', onKeyDown);
+            }, [undoDelete]);
+
+            const handleDream = async () => {
+                if (!bER.current || isDreaming) return; setIsDreaming(true); let existingNames = new Set(savedLibrary.map(i => i.name));
+                setDreamState(p => ({ ...p, pendingAccepted: 0, pendingAttempts: 0, pendingRejected: 0 }));
+                const acceptedHashes = savedLibrary.map(i => i.hash).filter(Boolean);
+                const hasLibrarySamples = savedLibrary.length > 0;
+                const baseOps = ['NOISE_PERLIN', 'NOISE_WORLEY', 'FRACTAL', 'SPIRAL', 'THRESHOLD', 'VIGNETTE', 'SMEAR', 'DOMAIN_WARP', 'RADIAL_WARP', 'KALEIDOSCOPE_PLUS', 'MORPH_DILATE_ERODE', 'MORPH_OPEN_CLOSE', 'EDGE_SOBEL', 'OUTLINE_ALPHA', 'POSTERIZE_ALPHA', 'DISTANCE_BANDS'];
+                const libraryOps = hasLibrarySamples ? ['LIBRARY_STAMP_SCATTER', 'LIBRARY_DISPLACE'] : [];
+                const ops = [...baseOps, ...libraryOps];
+                const enabledFilterTemplates = buildEnabledFilterSteps();
+                const libraryRenderCache = [];
+                if (hasLibrarySamples) {
+                    const cacheEngine = new TextureEngine(64, 64);
+                    const maxLibrarySamples = Math.min(savedLibrary.length, 24);
+                    for (let i = 0; i < maxLibrarySamples; i++) {
+                        const randomLibraryItem = savedLibrary[Math.floor(Math.random() * savedLibrary.length)];
+                        if (!randomLibraryItem?.config?.length) continue;
+                        cacheEngine.renderStack(randomLibraryItem.config);
+                        libraryRenderCache.push(cacheEngine.getTextureCanvas(randomLibraryItem.config.length - 1));
+                    }
+                }
+                const gRS = () => {
+                    const count = Math.floor(Math.random() * (dreamParams.maxComplexity - dreamParams.minComplexity + 1)) + dreamParams.minComplexity;
+                    const ns = []; const gens = ['BASE_SHAPE', 'BASE_GRAD'];
+                    const bK = gens[Math.floor(Math.random() * gens.length)]; const bD = STEP_TYPES[bK]; const bP = { ...bD.params };
+                    bD.controls.forEach(c => { if (c.type === 'slider') bP[c.key] = c.min + Math.random() * (c.max - c.min); });
+                    ns.push({ id: 'b' + Date.now(), typeDef: bD, active: true, blendMode: 0, params: bP, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
+                    for (let i = 0; i < count; i++) {
+                        const k = ops[Math.floor(Math.random() * ops.length)]; const d = STEP_TYPES[k]; const p = { ...d.params };
+                        d.controls.forEach(c => { if (c.type === 'slider') p[c.key] = c.min + Math.random() * (c.max - c.min); });
+                        ns.push({ id: 'o' + Date.now() + i, typeDef: d, active: true, blendMode: d.cat === 'GEN' ? 0 : (d.cat === 'ERODE' ? 1 : 2), params: p, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
+                    }
+                    enabledFilterTemplates.forEach(s => ns.push({ ...s, id: `${s.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }));
+                    const vD = STEP_TYPES.VIGNETTE; ns.push({ id: 'v' + Date.now(), typeDef: vD, active: true, blendMode: 2, params: { ...vD.params, p1: 1, p2: 0.45, p3: 0.2 }, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
+                    return ns;
+                };
+                try {
+                    const cycles = Math.max(1, dreamParams.batchCycles);
+                    let acceptedTotal = 0;
+                    let attemptedTotal = 0;
+                    let rejectedTotal = 0;
+                    let lastDiagSyncAt = performance.now();
+                    const syncDiagnostics = (force = false) => {
+                        const now = performance.now();
+                        if (!force && now - lastDiagSyncAt < 120) return;
+                        lastDiagSyncAt = now;
+                        setDreamState(p => ({ ...p, pendingAccepted: acceptedTotal, pendingAttempts: attemptedTotal, pendingRejected: rejectedTotal }));
+                    };
+                    for (let b = 0; b < cycles; b++) {
+                        setDreamState(p => ({ ...p, phase: `Batch ${b + 1}...` })); const batch = [];
+                        const pendingResults = [];
+                        let lastFlushAt = performance.now();
+                        let flushedOnce = false;
+                        const flushPendingResults = () => {
+                            if (pendingResults.length === 0) return;
+                            const toAppend = pendingResults.splice(0, pendingResults.length);
+                            setDreamState(p => ({ ...p, results: [...p.results, ...toAppend] }));
+                            lastFlushAt = performance.now();
+                        };
+                        const requestedWorkers = Math.max(1, Math.min(MAX_GENERATION_WORKERS, parseInt(dreamParams.generationWorkers || 1)));
+                        const generationWorkerCount = autoDreamRef.current ? requestedWorkers : 1;
+                        if (!generationEnginesRef.current) generationEnginesRef.current = [];
+		                        while (generationEnginesRef.current.length < generationWorkerCount) {
+		                            generationEnginesRef.current.push(new TextureEngine(64, 64));
+		                        }
+		                        const workerEngines = generationEnginesRef.current.slice(0, generationWorkerCount);
+
+                        await runWorkerPool(dreamParams.batchSize, generationWorkerCount, async (i, slot) => {
+                            const workerEngine = workerEngines[slot];
+                            let attempts = 0;
+                            while (attempts < 10) {
+                                attempts++;
+                                attemptedTotal++;
+                                syncDiagnostics();
+                                const cfg = gRS();
+                                const needsLibraryTexture = hasLibrarySamples && cfg.some(s => s?.typeDef && (s.typeDef.id === 110 || s.typeDef.id === 111));
+                                const librarySource = needsLibraryTexture && libraryRenderCache.length > 0 ? libraryRenderCache[Math.floor(Math.random() * libraryRenderCache.length)] : null;
+                                workerEngine.renderStack(cfg, librarySource ? { librarySource } : undefined);
+                                const an = workerEngine.analyzeTexture(cfg.length - 1);
+                                if (passesQualityFilters(an, acceptedHashes)) {
+                                    const textureBlob = await workerEngine.getTextureBlob(cfg.length - 1);
+                                    const storageKey = `tex-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                                    const tempResultUrl = URL.createObjectURL(textureBlob);
+                                    await storeTextureBlob(storageKey, textureBlob);
+                                    storageKeySizesRef.current.set(storageKey, textureBlob.size || 0);
+                                    if (textureBlob.size) setStorageUsedBytes(prev => prev + textureBlob.size);
+                                    scheduleQuotaEstimate();
+                                    const baseItem = {
+                                        config: cfg,
+                                        storageKey,
+                                        id: `b${b}i${i}${Math.random()}`,
+                                        density: an.density,
+                                        sScore: an.sScore,
+                                        circularity: an.circularity,
+                                        squareness: an.squareness,
+                                        hash: an.hash,
+                                        name: generateSemanticName({ config: cfg, density: an.density, sScore: an.sScore }, existingNames)
+                                    };
+                                    const resultItem = { ...baseItem, url: tempResultUrl };
+                                    const libraryItem = { ...baseItem, url: null };
+                                    if (an.hash) acceptedHashes.push(an.hash);
+                                    acceptedTotal++;
+                                    syncDiagnostics(true);
+                                    existingNames.add(baseItem.name); batch.push(libraryItem); pendingResults.push(resultItem);
+                                    if (!flushedOnce) {
+                                        flushPendingResults();
+                                        flushedOnce = true;
+                                    } else if (pendingResults.length >= 5 || performance.now() - lastFlushAt > 200) {
+                                        flushPendingResults();
+                                    }
+                                    break;
+                                }
+                                rejectedTotal++;
+                                syncDiagnostics();
+                            }
+                            await new Promise(r => setTimeout(r, 5));
+                        });
+                        flushPendingResults();
+                        setSavedLibrary(prev => [...prev, ...batch]);
+                        syncDiagnostics(true);
+                    }
+                } catch (e) { console.error(e); } finally { setIsDreaming(false); setDreamState(p => ({ ...p, phase: '', pendingAccepted: 0, pendingAttempts: 0, pendingRejected: 0 })); if (autoDreamRef.current) setTimeout(handleDream, 1000); }
+            };
+
+            const handleExportSet = async (targetSet) => {
+                if (exportingSetId) return; setExportingSetId(targetSet.id);
+	                try {
+	                    const zip = new JSZip(); const rs = [256, 512, 1024, 2048];
+	                    const setName = targetSet.name.replace(/\s+/g, '_');
+	                    const packWorkers = Math.max(1, Math.min(MAX_PACKAGING_WORKERS, parseInt(dreamParams.packagingWorkers || 1)));
+	                    await runWorkerPool(rs.length, packWorkers, async (resIdx) => {
+	                        const r = rs[resIdx];
+	                        setDreamState(p => ({ ...p, phase: `Exporting ${r}px...` }));
+	                        const engine = new TextureEngine(r, r); const resFolder = zip.folder(`${setName}_${r}`);
+	                        targetSet.items.forEach((item, idx) => {
+                            const fileName = `${setName}_${(idx + 1).toString().padStart(2, '0')}`;
+                            engine.renderStack(item.config);
+                            resFolder.file(`${fileName}.png`, engine.getTextureUrl(item.config.length - 1).split(',')[1], { base64: true });
+                        });
+                        await new Promise(res => setTimeout(res, 5));
+                    });
+
+	                    const flipbooksRoot = zip.folder(`${setName}_Flipbooks`);
+	                    await runWorkerPool(targetSet.items.length, packWorkers, async (itIdx) => {
+	                        const item = targetSet.items[itIdx];
+	                        const baseFileName = `${setName}_${(itIdx + 1).toString().padStart(2, '0')}`;
+	                        const fE = new TextureEngine(1024, 1024);
+	                        const base = JSON.parse(JSON.stringify(item.config));
+
+                        for (const mult of [4, 8, 16]) {
+                            setDreamState(p => ({ ...p, phase: `Packing ${baseFileName} x${mult}...` }));
+                            const subFolder = flipbooksRoot.folder(`${baseFileName}_x${mult}`);
+                            const sC = document.createElement('canvas'); sC.width = 1024 * mult; sC.height = 1024; const sCtx = sC.getContext('2d');
+
+                            for (let i = 0; i < mult; i++) {
+                                const ph = (i / mult) * Math.PI * 2;
+                                const cfg = base.map((s, idx) => {
+                                    if (idx === 0 || idx === base.length - 1) return s;
+                                    const isN = s.typeDef.cat === 'ERODE'; const nP = { ...s.params };
+                                    if (isN) { nP.p6 = (s.params.p6 || 0) + Math.cos(ph + idx) * 0.5; nP.p7 = (s.params.p7 || 0) + Math.sin(ph + idx) * 0.5; }
+                                    else if (s.typeDef.id === 13) nP.p1 = Math.max(0, Math.min(2, s.params.p1 + Math.sin(ph) * 0.2));
+                                    else if (s.typeDef.id === 12) nP.p1 = Math.max(1, Math.min(16, s.params.p1 + Math.round(Math.sin(ph) * 1.5)));
+                                    return { ...s, params: nP, universal: { ...s.universal, mult: s.universal.mult + Math.sin(ph + idx) * 0.05, scale: s.universal.scale + Math.cos(ph + idx) * 0.02 } };
+                                });
+                                fE.renderStack(cfg);
+                                const frameUrl = fE.getTextureUrl(cfg.length - 1);
+                                subFolder.file(`frame_${(i + 1).toString().padStart(2, '0')}.png`, frameUrl.split(',')[1], { base64: true });
+                                const img = await new Promise(res => { const iO = new Image(); iO.onload = () => res(iO); iO.src = frameUrl; });
+                                sCtx.drawImage(img, i * 1024, 0);
+                            }
+                            subFolder.file(`${baseFileName}_SpriteSheet.png`, sC.toDataURL().split(',')[1], { base64: true });
+                            await new Promise(res => setTimeout(res, 2));
+                        }
+                    });
+
+                    const blob = await zip.generateAsync({ type: "blob" });
+                    const link = document.createElement('a'); link.download = `${setName}_Pack.zip`;
+                    link.href = URL.createObjectURL(blob); link.click();
+                } catch (e) { } finally { setExportingSetId(null); setDreamState(p => ({ ...p, phase: '' })); }
+            };
+
+            const handleDeleteSet = async (targetSet) => {
+                if (!targetSet?.items?.length) return;
+                const removeIds = new Set(targetSet.items.map(it => it.id));
+                const removedItems = savedLibrary.filter(it => removeIds.has(it.id));
+                const nextLibrary = savedLibrary.filter(it => !removeIds.has(it.id));
+                setSavedLibrary(nextLibrary);
+                pushDeleteHistory({
+                    id: `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    type: 'set',
+                    label: targetSet.name || 'Set',
+                    items: removedItems
+                });
+            };
+
+            const updateFilterModule = (id, updater) => {
+                setFilterModules(prev => prev.map(m => {
+                    if (m.id !== id) return m;
+                    return typeof updater === 'function' ? updater(m) : { ...m, ...updater };
+                }));
+            };
+
+            return {
+                ui: { activeTab, setActiveTab, showGizmos, setShowGizmos, enableAI, setEnableAI },
+                storage: { usedBytes: storageUsedBytes, quotaBytes: storageQuotaBytes },
+                customOps: { items: customOperations, add: (op) => setCustomOperations(prev => [...prev, op]) },
+                filters: {
+                    modules: filterModules,
+                    quality: qualityFilters,
+                    toggleEnabled: (id) => updateFilterModule(id, (m) => ({ ...m, enabled: !m.enabled })),
+                    toggleExpanded: (id) => updateFilterModule(id, (m) => ({ ...m, expanded: !m.expanded })),
+                    move: (id, dir) => setFilterModules(prev => {
+                        const idx = prev.findIndex(m => m.id === id);
+                        const to = idx + dir;
+                        if (idx < 0 || to < 0 || to >= prev.length) return prev;
+                        const next = [...prev];
+                        [next[idx], next[to]] = [next[to], next[idx]];
+                        return next;
+                    }),
+                    updateBlend: (id, blendMode) => updateFilterModule(id, (m) => ({ ...m, blendMode })),
+                    updateParam: (id, key, value) => updateFilterModule(id, (m) => ({ ...m, params: { ...m.params, [key]: value } })),
+                    updateUniversal: (id, key, value) => updateFilterModule(id, (m) => ({ ...m, universal: { ...m.universal, [key]: value } })),
+                    updateQuality: (section, key, value) => setQualityFilters(prev => ({ ...prev, [section]: { ...prev[section], [key]: value } })),
+                    toggleQualityEnabled: (section) => setQualityFilters(prev => ({ ...prev, [section]: { ...prev[section], enabled: !prev[section].enabled } })),
+                    toggleQualityExpanded: (section) => setQualityFilters(prev => ({ ...prev, [section]: { ...prev[section], expanded: !prev[section].expanded } }))
+                },
+                builder: {
+                    steps,
+                    updateStep: (id, ch) => setSteps(p => p.map(s => s.id === id ? { ...s, ...ch } : s)),
+                    toggleStep: (id) => setSteps(p => p.map(s => s.id === id ? { ...s, active: !s.active } : s)),
+                    addStep: (keyOrCustomId, idx) => setSteps(p => {
+                        let ns = null;
+                        if (typeof keyOrCustomId === 'string' && keyOrCustomId.startsWith('CUSTOM_OP::')) {
+                            const customId = keyOrCustomId.split('CUSTOM_OP::')[1];
+                            const customOp = customOperations.find(op => op.id === customId && op.type === 'shader');
+                            if (!customOp) return p;
+                            ns = {
+                                id: 's' + Date.now(),
+                                typeDef: { id: 1000, name: customOp.title || 'Custom Shader', cat: 'MOD', controls: [] },
+                                active: true,
+                                blendMode: 2,
+                                params: { p1: 0, p2: 0, p3: 0, p4: 0, p5: 0, p6: 0, p7: 0 },
+                                universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 },
+                                customOpType: 'shader',
+                                customOpId: customOp.id,
+                                customCode: customOp.code,
+                                note: customOp.description || ''
+                            };
+                        } else {
+                            const td = STEP_TYPES[keyOrCustomId];
+                            if (!td) return p;
+                            ns = {
+                                id: 's' + Date.now(),
+                                typeDef: td,
+                                active: true,
+                                blendMode: td.cat === 'GEN' ? 0 : (td.cat === 'ERODE' ? 1 : 2),
+                                params: { ...td.params },
+                                universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 }
+                            };
+                            if (td.customOpType === 'shader') {
+                                ns.customOpType = 'shader';
+                                ns.customCode = td.customCode;
+                            }
+                        }
+                        const next = [...p];
+                        if (idx === -1) next.push(ns); else next.splice(idx, 0, ns);
+                        return next;
+                    }),
+                    removeStep: (id) => setSteps(p => p.filter(s => s.id !== id)),
+                    moveStep: (idx, dir) => setSteps(p => { const n = [...p]; const t = idx + dir; if (t >= 0 && t < n.length) [n[idx], n[t]] = [n[t], n[idx]]; return n; }),
+                    previewUrls,
+                    finalPreviewUrl,
+                    profileName,
+                    setProfileName,
+                    erosion,
+                    setErosion,
+                    resList: [256, 512, 1024, 2048, 4096],
+                    selectedRes: selectedRes,
+                    toggleRes: (r) => setSelectedRes(p => p.includes(r) ? p.filter(x => x !== r) : [...p, r].sort((a, b) => a - b)),
+                    onExport: async () => { const z = new JSZip(); for (const r of selectedRes) { const e = new TextureEngine(r, r); e.renderStack(steps); const url = e.getTextureUrl(steps.length - 1); z.file(`${profileName}_${r}.png`, url.split(',')[1], { base64: true }); } const c = await z.generateAsync({ type: "blob" }); const l = document.createElement('a'); l.download = `${profileName}.zip`; l.href = URL.createObjectURL(c); l.click(); }
+                },
+                dream: {
+                    params: dreamParams,
+                    setParams: setDreamParams,
+                    onDream: handleDream,
+                    isDreaming,
+                    state: dreamState,
+                    onDeleteResult: async (id) => {
+                        const nextResults = dreamState.results.filter(r => r.id !== id);
+                        const nextLibrary = savedLibrary;
+                        const removed = dreamState.results.find(r => r.id === id);
+                        setDreamState(p => ({ ...p, results: p.results.filter(r => r.id !== id) }));
+                        if (removed?.storageKey) await cleanupStorageIfUnreferenced(removed.storageKey, nextLibrary, nextResults);
+                    }
+                },
+                library: {
+                    items: savedLibrary,
+                    sets,
+                    onSave: (it) => setSavedLibrary(p => [...p, { ...it, url: null }]),
+                    onLoad: (cfg) => { setSteps(cfg); setActiveTab('builder'); },
+                    onDelete: async (id) => {
+                        const removed = savedLibrary.find(it => it.id === id);
+                        const nextLibrary = savedLibrary.filter(it => it.id !== id);
+                        setSavedLibrary(nextLibrary);
+                        if (removed) {
+                            pushDeleteHistory({
+                                id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                                type: 'item',
+                                label: removed.name || 'Library Item',
+                                items: [removed]
+                            });
+                        }
+                    },
+                    renameSet: handleRenameSet,
+                    exportSet: handleExportSet,
+                    deleteSet: handleDeleteSet,
+                    exportingSetId
+                },
+                engines: { preview: bER.current }
+            };
+        }
+
+        const NavBar = ({ uiVM }) => (
+            <div className="h-12 bg-[#1a1a1a] flex items-center justify-center gap-8 border-b border-gray-800 shrink-0">
+                <button onClick={() => uiVM.setActiveTab('generator')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'generator' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>FACTORY</button>
+                <button onClick={() => uiVM.setActiveTab('builder')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'builder' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>WORKBENCH</button>
+                <button onClick={() => uiVM.setActiveTab('library')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'library' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>LIBRARY</button>
+                <button onClick={() => uiVM.setActiveTab('sets')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'sets' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>SETS</button>
+                <button onClick={() => uiVM.setActiveTab('filters')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'filters' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>FILTERS</button>
+                <button onClick={() => uiVM.setActiveTab('operations')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'operations' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>OPERATIONS</button>
+                <button onClick={() => uiVM.setActiveTab('editor')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'editor' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>EDITOR</button>
+                <button onClick={() => uiVM.setActiveTab('settings')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'settings' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>SETTINGS</button>
+            </div>
+        );
+
+        function App() {
+            const vm = useAppViewModel();
+            return (
+                <div className="flex flex-col h-screen bg-[#111] text-gray-200 font-sans">
+                    <NavBar uiVM={vm.ui} />
+                    <div className="h-8 px-4 border-b border-gray-800 bg-[#121212] flex items-center justify-between text-[11px] text-gray-400 font-mono">
+                        <span>LOCAL CACHE</span>
+                        <span>{formatBytes(vm.storage.usedBytes)}{vm.storage.quotaBytes ? ` / ${formatBytes(vm.storage.quotaBytes)}` : ''}</span>
+                    </div>
+                    <div className="flex-1 overflow-hidden relative">
+                        {vm.ui.activeTab === 'builder' && <BuilderTab bVM={vm.builder} uiVM={vm.ui} customOpsVM={vm.customOps} />}
+                        {vm.ui.activeTab === 'generator' && <GeneratorTab dVM={vm.dream} libVM={vm.library} previewEngine={vm.engines.preview} />}
+                        {vm.ui.activeTab === 'library' && <LibraryTab libVM={vm.library} previewEngine={vm.engines.preview} />}
+                        {vm.ui.activeTab === 'sets' && <SetsTab libVM={vm.library} previewEngine={vm.engines.preview} />}
+                        {vm.ui.activeTab === 'filters' && <FiltersTab filtersVM={vm.filters} />}
+                        {vm.ui.activeTab === 'operations' && <OperationsTab customOpsVM={vm.customOps} />}
+                        {vm.ui.activeTab === 'editor' && <EditorTab customOpsVM={vm.customOps} />}
+                        {vm.ui.activeTab === 'settings' && <div className="p-12 text-gray-500 text-center">AlphaCarve Core Active. Ready for further integration.</div>}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
