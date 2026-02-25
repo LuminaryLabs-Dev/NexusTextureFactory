@@ -163,6 +163,92 @@
             );
         }
 
+        function FactoryLadderItem({ item, onClick }) {
+            const [storedUrl, setStoredUrl] = useState(item.url || null);
+            const fmtScore = (value) => (typeof value === 'number' && !Number.isNaN(value) ? value.toFixed(2) : '--');
+            const fmtPct = (value) => (typeof value === 'number' && !Number.isNaN(value) ? `${(value * 100).toFixed(0)}%` : '--');
+            useEffect(() => {
+                let revokedUrl = null;
+                let cancelled = false;
+                (async () => {
+                    if (!item?.storageKey) {
+                        setStoredUrl(item?.url || null);
+                        return;
+                    }
+                    try {
+                        const blob = await loadTextureBlob(item.storageKey);
+                        if (!blob || cancelled) return;
+                        const objectUrl = URL.createObjectURL(blob);
+                        revokedUrl = objectUrl;
+                        setStoredUrl(objectUrl);
+                        if (item?.url && typeof item.url === 'string' && item.url.startsWith('blob:')) {
+                            URL.revokeObjectURL(item.url);
+                        }
+                    } catch (_) {
+                        if (!cancelled) setStoredUrl(item?.url || null);
+                    }
+                })();
+                return () => {
+                    cancelled = true;
+                    if (revokedUrl) URL.revokeObjectURL(revokedUrl);
+                };
+            }, [item?.storageKey, item?.url]);
+            return (
+                <button onClick={() => onClick?.(item.config)} className="w-full h-[92px] bg-[#111] border border-gray-800 hover:border-blue-500/70 rounded overflow-hidden flex items-stretch text-left">
+                    <div className="w-[92px] h-[92px] shrink-0 checkerboard bg-black border-r border-gray-800">
+                        <img src={storedUrl || item.url} className="w-full h-full object-contain" />
+                    </div>
+                    <div className="flex-1 px-3 py-2 flex flex-col justify-between">
+                        <div className="text-[11px] text-white font-mono truncate">{item.name}</div>
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-gray-400 font-mono">
+                            <div>alpha: {fmtScore(item.density)}</div>
+                            <div>simple: {fmtScore(item.sScore)}</div>
+                            <div>circle: {fmtScore(item.circularity)}</div>
+                            <div>square: {fmtScore(item.squareness)}</div>
+                            <div>change: {fmtPct(item.changeScore)}</div>
+                            <div>jitter: {fmtPct(item.jitterScore)}</div>
+                        </div>
+                    </div>
+                </button>
+            );
+        }
+
+        function VirtualizedFactoryItem(props) {
+            const hostRef = useRef(null);
+            const [isVisible, setIsVisible] = useState(false);
+            useEffect(() => {
+                const el = hostRef.current;
+                if (!el) return;
+                if (!('IntersectionObserver' in window)) {
+                    setIsVisible(true);
+                    return;
+                }
+                const observer = new IntersectionObserver((entries) => {
+                    const entry = entries[0];
+                    setIsVisible(entry.isIntersecting);
+                }, { root: null, rootMargin: '500px', threshold: 0.01 });
+                observer.observe(el);
+                return () => observer.disconnect();
+            }, []);
+            return (
+                <div ref={hostRef}>
+                    {isVisible ? (
+                        <FactoryLadderItem {...props} />
+                    ) : (
+                        <div className="w-full h-[92px] bg-[#111] border border-gray-900 rounded"></div>
+                    )}
+                </div>
+            );
+        }
+
+        function OpenFactorySlotRow() {
+            return (
+                <div className="w-full h-[92px] bg-[#111] border border-dashed border-gray-700 rounded flex items-center justify-center text-[10px] font-mono uppercase tracking-wide text-gray-500">
+                    Open Slot
+                </div>
+            );
+        }
+
         function AddMenu({ onAdd, variant, customShaderOps = [] }) {
             const [isOpen, setIsOpen] = useState(false); const menuRef = useRef(null);
             useEffect(() => { const hCO = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setIsOpen(false); }; if (isOpen) document.addEventListener("mousedown", hCO); return () => document.removeEventListener("mousedown", hCO); }, [isOpen]);
@@ -263,8 +349,20 @@
 
         function GeneratorTab({ dVM, libVM, previewEngine, uiVM, flipbookVM }) {
             const [showC, setShowC] = useState(true);
+            const [page, setPage] = useState(1);
             const results = dVM.state.results || [];
-            const liveStart = Math.max(0, results.length - 24);
+            const pageSize = 200;
+            const totalPages = Math.max(1, Math.ceil(results.length / pageSize));
+            useEffect(() => {
+                setPage((p) => {
+                    const clamped = Math.max(1, Math.min(p, totalPages));
+                    return clamped;
+                });
+            }, [totalPages]);
+            const pageStart = (page - 1) * pageSize;
+            const pageEnd = pageStart + pageSize;
+            const pageResults = results.slice(pageStart, pageEnd);
+            const liveStart = Math.max(0, pageResults.length - 24);
             const cfg = libVM?.packConfig || {};
             const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
             const complexityRangeRef = useRef(null);
@@ -358,11 +456,16 @@
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 pb-48 relative">
                         {dVM.isDreaming && <div className="fixed top-24 left-1/2 -translate-x-1/2 bg-black/90 px-6 py-2 rounded-full border border-purple-500 text-purple-400 text-xs font-mono animate-pulse z-40 shadow-2xl">{dVM.state.phase} | attempts: {dVM.state.pendingAttempts || 0} | accepted: {dVM.state.pendingAccepted || 0} | rejected: {dVM.state.pendingRejected || 0} | gen:{dVM.state.activeGenWorkers || 0} | backfill:{dVM.state.activeBackfillWorkers || 0} | queue:{dVM.state.pendingBackfill || 0}</div>}
-                        <div className="grid grid-cols-6 gap-4">{results.map((it, idx) => {
-                            if (it?.__slotOpen) return <OpenSlotTile key={it.id} />;
-                            const itemProps = { item: it, engine: previewEngine, flipFrames: dVM.params.flipFrames, flipbookConfig: flipbookVM?.config, autoAnimate: uiVM?.autoAnimateFrames, onDelete: () => dVM.onDeleteResult(it.id), onSave: libVM.onSave, onClick: libVM.onLoad, dragEnabled: reorderEnabled, onReorder: libVM.reorderByDrag };
-                            return idx >= liveStart ? <TextureItemFlip key={it.id} {...itemProps} /> : <VirtualizedTextureItem key={it.id} {...itemProps} />;
+                        <div className="grid grid-cols-2 gap-2">{pageResults.map((it, idx) => {
+                            if (it?.__slotOpen) return <OpenFactorySlotRow key={it.id} />;
+                            const itemProps = { item: it, onClick: libVM.onLoad };
+                            return idx >= liveStart ? <FactoryLadderItem key={it.id} {...itemProps} /> : <VirtualizedFactoryItem key={it.id} {...itemProps} />;
                         })}</div>
+                        <div className="mt-4 flex items-center justify-center gap-2">
+                            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} className={`px-3 py-1.5 rounded text-[10px] font-bold border ${page <= 1 ? 'border-gray-800 text-gray-600 cursor-not-allowed bg-[#171717]' : 'border-gray-700 text-gray-200 hover:bg-[#2a2a2a] bg-[#1d1d1d]'}`}>PREV</button>
+                            <div className="px-3 py-1.5 rounded text-[10px] font-mono text-gray-300 border border-gray-800 bg-[#151515]">PAGE {page} / {totalPages}</div>
+                            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className={`px-3 py-1.5 rounded text-[10px] font-bold border ${page >= totalPages ? 'border-gray-800 text-gray-600 cursor-not-allowed bg-[#171717]' : 'border-gray-700 text-gray-200 hover:bg-[#2a2a2a] bg-[#1d1d1d]'}`}>NEXT</button>
+                        </div>
                     </div>
                     <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex items-center">
                         <button
