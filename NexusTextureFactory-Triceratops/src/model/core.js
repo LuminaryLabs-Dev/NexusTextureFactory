@@ -192,6 +192,9 @@ return Math.max(0, Math.min(1, 1 - d * 2.2));`;
                     enabled: true,
                     minFrameDensity: 0.03,
                     maxEmptyFrameRatio: 0.25,
+                    minTemporalChange: 0.12,
+                    maxTemporalChange: 0.95,
+                    maxJitter: 0.2,
                     minFrameDelta: 0.008,
                     maxFrameDelta: 0.2
                 },
@@ -359,24 +362,65 @@ return Math.max(0, Math.min(1, 1 - d * 2.2));`;
             return diff / (prevAlpha.length * 255);
         };
 
-        const evaluateFlipbookFrames = (analyses, deltas, qualityConfig) => {
+        const computeTemporalChangeMetrics = (alphaFrames, opts = {}) => {
+            const frames = Array.isArray(alphaFrames) ? alphaFrames : [];
+            const frameCount = frames.length;
+            if (frameCount < 2) {
+                return {
+                    changeScore: 0,
+                    jitterScore: 0,
+                    similarityCurve: [],
+                    dissimilarityCurve: []
+                };
+            }
+            const anchor = Math.max(1, Math.min(frameCount - 1, Number(opts.anchorIndex ?? (frameCount - 1))));
+            const reference = frames[anchor];
+            let weightedSum = 0;
+            let weightTotal = 0;
+            const similarityCurve = [];
+            const dissimilarityCurve = [];
+            for (let t = 0; t < anchor; t++) {
+                const dissimilarity = computeFrameDelta(frames[t], reference);
+                const similarity = 1 - dissimilarity;
+                const weight = (anchor - t) / anchor;
+                similarityCurve.push(similarity);
+                dissimilarityCurve.push(dissimilarity);
+                weightedSum += weight * dissimilarity;
+                weightTotal += weight;
+            }
+            const changeScore = weightTotal > 0 ? (weightedSum / weightTotal) : 0;
+            let jitterSum = 0;
+            let jitterCount = 0;
+            for (let t = 1; t < frameCount; t++) {
+                jitterSum += computeFrameDelta(frames[t - 1], frames[t]);
+                jitterCount++;
+            }
+            const jitterScore = jitterCount > 0 ? (jitterSum / jitterCount) : 0;
+            return { changeScore, jitterScore, similarityCurve, dissimilarityCurve };
+        };
+
+        const evaluateFlipbookFrames = (analyses, alphaFrames, qualityConfig) => {
             const quality = qualityConfig || {};
             if (quality.enabled === false) return { pass: true, reason: '', metrics: {} };
             const frameCount = Math.max(1, analyses.length);
             const minDensity = Number(quality.minFrameDensity ?? 0);
             const maxEmptyRatio = Number(quality.maxEmptyFrameRatio ?? 1);
-            const minDelta = Number(quality.minFrameDelta ?? 0);
-            const maxDelta = Number(quality.maxFrameDelta ?? 1);
+            const minTemporalChange = Number(quality.minTemporalChange ?? quality.minFrameDelta ?? 0);
+            const maxTemporalChange = Number(quality.maxTemporalChange ?? 1);
+            const maxJitter = Number(quality.maxJitter ?? quality.maxFrameDelta ?? 1);
             let empty = 0;
             analyses.forEach((a) => { if (!a || a.density < minDensity) empty++; });
             const emptyRatio = empty / frameCount;
-            const avgDelta = deltas.length ? (deltas.reduce((sum, v) => sum + v, 0) / deltas.length) : 0;
-            const maxObservedDelta = deltas.length ? Math.max(...deltas) : 0;
-            const minObservedDelta = deltas.length ? Math.min(...deltas) : 0;
-            if (emptyRatio > maxEmptyRatio) return { pass: false, reason: 'too_many_empty_frames', metrics: { emptyRatio, avgDelta, maxObservedDelta, minObservedDelta } };
-            if (avgDelta < minDelta) return { pass: false, reason: 'motion_too_static', metrics: { emptyRatio, avgDelta, maxObservedDelta, minObservedDelta } };
-            if (maxObservedDelta > maxDelta) return { pass: false, reason: 'motion_too_busy', metrics: { emptyRatio, avgDelta, maxObservedDelta, minObservedDelta } };
-            return { pass: true, reason: '', metrics: { emptyRatio, avgDelta, maxObservedDelta, minObservedDelta } };
+            const temporal = computeTemporalChangeMetrics(alphaFrames, { anchorIndex: Math.max(1, (alphaFrames?.length || 1) - 1) });
+            const metrics = {
+                emptyRatio,
+                changeScore: temporal.changeScore,
+                jitterScore: temporal.jitterScore
+            };
+            if (emptyRatio > maxEmptyRatio) return { pass: false, reason: 'too_many_empty_frames', metrics };
+            if (temporal.changeScore < minTemporalChange) return { pass: false, reason: 'motion_too_static', metrics };
+            if (temporal.changeScore > maxTemporalChange || temporal.jitterScore > maxJitter) return { pass: false, reason: 'motion_too_busy', metrics };
+            return { pass: true, reason: '', metrics };
         };
 
         const computeAlphaHash = (pixels, width, height) => {

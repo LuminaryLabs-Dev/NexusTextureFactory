@@ -1,5 +1,5 @@
 	        function useAppViewModel() {
-            const [activeTab, setActiveTab] = useState('builder'); const [showGizmos, setShowGizmos] = useState(true); const [enableAI, setEnableAI] = useState(true); const [autoAnimateFrames, setAutoAnimateFrames] = useState(false);
+            const [activeTab, setActiveTab] = useState('generator'); const [showGizmos, setShowGizmos] = useState(true); const [enableAI, setEnableAI] = useState(true); const [autoAnimateFrames, setAutoAnimateFrames] = useState(false);
             const [erosion, setErosion] = useState(0); const [profileName, setProfileName] = useState("Texture_01");
             const [storageUsedBytes, setStorageUsedBytes] = useState(0); const [storageQuotaBytes, setStorageQuotaBytes] = useState(0);
             const [selectedRes, setSelectedRes] = useState([2048]);
@@ -11,18 +11,18 @@
                 alpha: { enabled: true, min: 0.15, max: 0.75, expanded: true },
                 similarity: { enabled: false, maxSimilarity: 0.9, historySize: 200, expanded: false },
                 shape: { enabled: false, minCircularity: 0.2, maxCircularity: 1.0, minSquareness: 0.2, maxSquareness: 1.0, expanded: false },
-                staticMotion: { enabled: true, min: 0.0, max: 0.85, expanded: false },
+                temporalChange: { enabled: true, minChange: 0.12, maxChange: 0.95, maxJitter: 0.2, expanded: false },
                 simplicity: { enabled: true, min: 0.1, max: 0.9, expanded: false }
             });
             const [packConfig, setPackConfig] = useState({
-                groupBy: 'prefix',
+                groupBy: 'volume_fill',
                 groupDepth: 2,
                 maxItemsPerPack: 50,
-                sortBy: 'name',
+                sortBy: 'none',
                 sortDir: 'asc'
             });
             const [flipbookConfig, setFlipbookConfig] = useState(createDefaultFlipbookConfig());
-	            const [dreamParams, setDreamParams] = useState({ batchSize: 20, batchCycles: 1, generationWorkers: 1, packagingWorkers: 1, refineCycles: 1, minDensity: 0.15, maxDensity: 0.75, minSimplicity: 0.1, maxSimplicity: 0.9, varianceStrictness: 0.1, randStrength: 0.5, flipFrames: 16, prompt: "", minComplexity: 1, maxComplexity: 4, autoDream: false });
+	            const [dreamParams, setDreamParams] = useState({ batchSize: 20, batchCycles: 1, generationWorkers: 5, packagingWorkers: 5, refineCycles: 1, minDensity: 0.15, maxDensity: 0.75, minSimplicity: 0.1, maxSimplicity: 0.9, varianceStrictness: 0.1, randStrength: 0.5, flipFrames: 16, prompt: "", minComplexity: 5, maxComplexity: 10, autoDream: false });
 
             const autoDreamRef = useRef(false);
             useEffect(() => { autoDreamRef.current = dreamParams.autoDream; }, [dreamParams.autoDream]);
@@ -99,7 +99,7 @@
                                 alpha: { ...prev.alpha, ...(parsed.alpha || {}) },
                                 similarity: { ...prev.similarity, ...(parsed.similarity || {}) },
                                 shape: { ...prev.shape, ...(parsed.shape || {}) },
-                                staticMotion: { ...prev.staticMotion, ...(parsed.staticMotion || {}) },
+                                temporalChange: { ...prev.temporalChange, ...(parsed.temporalChange || {}) },
                                 simplicity: { ...prev.simplicity, ...(parsed.simplicity || {}) }
                             }));
                         }
@@ -107,7 +107,16 @@
                     const rawDreamParams = localStorage.getItem(META_KEY_DREAM_PARAMS);
                     if (rawDreamParams) {
                         const parsed = JSON.parse(rawDreamParams);
-                        if (parsed && typeof parsed === 'object') setDreamParams(prev => ({ ...prev, ...parsed }));
+                        if (parsed && typeof parsed === 'object') {
+                            const nextMinComplexity = Math.max(1, Math.min(20, parseInt(parsed.minComplexity ?? 5)));
+                            const nextMaxComplexity = Math.max(nextMinComplexity, Math.min(20, parseInt(parsed.maxComplexity ?? 10)));
+                            setDreamParams(prev => ({
+                                ...prev,
+                                ...parsed,
+                                minComplexity: nextMinComplexity,
+                                maxComplexity: nextMaxComplexity
+                            }));
+                        }
                     }
                     const rawUiPrefs = localStorage.getItem(META_KEY_UI_PREFS);
                     if (rawUiPrefs) {
@@ -165,6 +174,7 @@
                     return parts.slice(0, depth).join('_') || 'Misc';
                 };
                 const cmp = (a, b) => {
+                    if (packConfig.sortBy === 'none') return 0;
                     let av = a.name;
                     let bv = b.name;
                     if (packConfig.sortBy === 'density') { av = a.density || 0; bv = b.density || 0; }
@@ -217,6 +227,7 @@
                         return parts.slice(0, depth).join('_') || 'Misc';
                     };
                     const cmp = (a, b) => {
+                        if (packConfig.sortBy === 'none') return 0;
                         let av = a.name;
                         let bv = b.name;
                         if (packConfig.sortBy === 'density') { av = a.density || 0; bv = b.density || 0; }
@@ -238,16 +249,21 @@
                 });
             };
 
-            const handleRenameSet = (oldKey, newName) => {
+            const handleRenameSet = (targetSet, newName) => {
                 if (packConfig.groupBy === 'volume_fill') return;
-                const normalizedOldKey = (oldKey || '').replace(/\s+Vol\s+\d+$/i, '').replace(/\s+/g, '_');
                 const newNameBase = (newName || '').trim().replace(/\s+/g, '_') || 'Set';
                 setSavedLibrary(prev => {
-                    const groupItems = prev.filter(i => i.name.split('_').slice(0, -1).join('_') === normalizedOldKey);
+                    const setItemIds = new Set(Array.isArray(targetSet?.items) ? targetSet.items.map(i => i.id) : []);
+                    let groupItems = prev.filter(i => setItemIds.has(i.id));
+                    if (groupItems.length === 0) {
+                        const oldKey = typeof targetSet === 'string' ? targetSet : (targetSet?.baseKey || targetSet?.name || '');
+                        const normalizedOldKey = (oldKey || '').replace(/\s+Vol\s+\d+$/i, '').replace(/\s+/g, '_');
+                        groupItems = prev.filter(i => i.name.split('_').slice(0, -1).join('_') === normalizedOldKey);
+                    }
+                    const groupOrder = groupItems.map(i => i.id);
                     return prev.map((item) => {
-                        const itemKey = item.name.split('_').slice(0, -1).join('_');
-                        if (itemKey !== normalizedOldKey) return item;
-                        const groupIdx = groupItems.findIndex(i => i.id === item.id);
+                        const groupIdx = groupOrder.indexOf(item.id);
+                        if (groupIdx < 0) return item;
                         const indexStr = (groupIdx + 1).toString().padStart(2, '0');
                         return { ...item, name: `${newNameBase}_${indexStr}` };
                     });
@@ -272,10 +288,12 @@
                 const simplicityFilter = qualityFilters.simplicity;
                 if (simplicityFilter.enabled && (analysis.sScore < simplicityFilter.min || analysis.sScore > simplicityFilter.max)) return false;
 
-                const staticFilter = qualityFilters.staticMotion;
-                if (staticFilter.enabled) {
-                    const staticPct = Number(analysis.staticPct || 0);
-                    if (staticPct < staticFilter.min || staticPct > staticFilter.max) return false;
+                const temporalFilter = qualityFilters.temporalChange;
+                if (temporalFilter.enabled) {
+                    const changeScore = Number(analysis.changeScore || 0);
+                    const jitterScore = Number(analysis.jitterScore || 0);
+                    if (changeScore < temporalFilter.minChange || changeScore > temporalFilter.maxChange) return false;
+                    if (jitterScore > temporalFilter.maxJitter) return false;
                 }
 
                 const shapeFilter = qualityFilters.shape;
@@ -301,25 +319,15 @@
                 return true;
             };
 
-            const computeStaticPercentageForConfig = (engine, baseConfig, frameCount, seed, renderOptions) => {
-                const total = Math.max(3, frameCount || 6);
-                const threshold = Number(flipbookConfig?.quality?.minFrameDelta ?? 0.008);
-                let prevAlpha = null;
-                let staticCount = 0;
-                let deltaCount = 0;
+            const computeTemporalMetricsForConfig = (engine, baseConfig, frameCount, seed, renderOptions) => {
+                const total = Math.max(2, frameCount || 16);
+                const alphaFrames = [];
                 for (let i = 0; i < total; i++) {
                     const cfg = buildAnimatedConfigFrame(baseConfig, i, total, seed, flipbookConfig);
                     engine.renderStack(cfg, renderOptions);
-                    const alpha = extractAlphaFromPixels(engine.readPixels(cfg.length - 1));
-                    if (prevAlpha) {
-                        const delta = computeFrameDelta(prevAlpha, alpha);
-                        if (delta < threshold) staticCount++;
-                        deltaCount++;
-                    }
-                    prevAlpha = alpha;
+                    alphaFrames.push(extractAlphaFromPixels(engine.readPixels(cfg.length - 1)));
                 }
-                if (deltaCount <= 0) return 1.0;
-                return staticCount / deltaCount;
+                return computeTemporalChangeMetrics(alphaFrames, { anchorIndex: total - 1 });
             };
 
 	            const storageKeySizesRef = useRef(new Map());
@@ -534,8 +542,9 @@
                                 const renderOptions = librarySource ? { librarySource } : undefined;
                                 workerEngine.renderStack(cfg, renderOptions);
                                 const an = workerEngine.analyzeTexture(cfg.length - 1);
-                                const staticPct = computeStaticPercentageForConfig(workerEngine, cfg, 6, `gen-${b}-${i}-${attempts}`, renderOptions);
-                                an.staticPct = staticPct;
+                                const temporalMetrics = computeTemporalMetricsForConfig(workerEngine, cfg, 16, `gen-${b}-${i}-${attempts}`, renderOptions);
+                                an.changeScore = temporalMetrics.changeScore;
+                                an.jitterScore = temporalMetrics.jitterScore;
                                 if (passesQualityFilters(an, acceptedHashes)) {
                                     workerEngine.renderStack(cfg, renderOptions);
                                     const textureBlob = await workerEngine.getTextureBlob(cfg.length - 1);
@@ -553,7 +562,8 @@
                                         sScore: an.sScore,
                                         circularity: an.circularity,
                                         squareness: an.squareness,
-                                        staticPct: an.staticPct,
+                                        changeScore: an.changeScore,
+                                        jitterScore: an.jitterScore,
                                         hash: an.hash,
                                         name: generateSemanticName({ config: cfg, density: an.density, sScore: an.sScore }, existingNames)
                                     };
@@ -613,12 +623,15 @@
 	                    const flipbooksRoot = zip.folder(`${setName}_Flipbooks`);
 	                    for (let itIdx = 0; itIdx < targetSet.items.length; itIdx++) {
 	                        const item = targetSet.items[itIdx];
-	                        const baseFileName = `${setName}_${(itIdx + 1).toString().padStart(2, '0')}`;
+	                        const indexPadded = (itIdx + 1).toString().padStart(2, '0');
+	                        const baseFileName = `${setName}_${indexPadded}`;
 	                        const fE = new TextureEngine(1024, 1024);
 	                        const base = JSON.parse(JSON.stringify(item.config));
+                            const indexFolderName = `${setName}_${indexPadded}_Flipbooks`;
+                            const indexFolder = flipbooksRoot.folder(indexFolderName);
 	                        for (const mult of [4, 8, 16]) {
 	                            setExportPhase(`Packing ${baseFileName} x${mult}...`);
-	                            const subFolder = flipbooksRoot.folder(`${baseFileName}_x${mult}`);
+                                const flipbookFileName = `${setName}_${indexPadded}_x${mult}_Flipbook`;
 	                            const sC = document.createElement('canvas');
 	                            sC.width = 1024 * mult;
 	                            sC.height = 1024;
@@ -628,18 +641,15 @@
                                     : `${baseFileName}|${mult}`;
                                 const frameOutputs = [];
                                 const analyses = [];
-                                const deltas = [];
-                                let prevAlpha = null;
+                                const alphaFrames = [];
 	                            for (let i = 0; i < mult; i++) {
 	                                const cfg = buildAnimatedConfigFrame(base, i, mult, sequenceSeed, flipbookConfig);
 	                                fE.renderStack(cfg);
                                         analyses.push(fE.analyzeTexture(cfg.length - 1));
-                                        const alpha = extractAlphaFromPixels(fE.readPixels(cfg.length - 1));
-                                        if (prevAlpha) deltas.push(computeFrameDelta(prevAlpha, alpha));
-                                        prevAlpha = alpha;
+                                        alphaFrames.push(extractAlphaFromPixels(fE.readPixels(cfg.length - 1)));
 	                                frameOutputs.push(await fE.getTextureCanvasAndBlob(cfg.length - 1));
 	                            }
-                                const evalResult = evaluateFlipbookFrames(analyses, deltas, flipbookConfig?.quality);
+                                const evalResult = evaluateFlipbookFrames(analyses, alphaFrames, flipbookConfig?.quality);
                                 const shouldFallbackToStatic = !evalResult.pass;
                                 if (shouldFallbackToStatic) {
                                     frameOutputs.length = 0;
@@ -649,13 +659,12 @@
                                 }
                                 for (let i = 0; i < frameOutputs.length; i++) {
                                     const frame = frameOutputs[i];
-                                    subFolder.file(`frame_${(i + 1).toString().padStart(2, '0')}.png`, frame.blob);
                                     sCtx.drawImage(frame.canvas, i * 1024, 0);
                                 }
 	                            const spriteSheetBlob = await new Promise((resolve) => {
 	                                sC.toBlob((blob) => resolve(blob || new Blob()), 'image/png');
 	                            });
-	                            subFolder.file(`${baseFileName}_SpriteSheet.png`, spriteSheetBlob);
+	                            indexFolder.file(`${flipbookFileName}.png`, spriteSheetBlob);
 	                        }
 	                    }
 	                    setExportPhase('Finalizing ZIP...');
@@ -673,10 +682,30 @@
 
             const handleDeleteSet = async (targetSet) => {
                 if (!targetSet?.items?.length) return;
+                const currentLibrary = savedLibraryRef.current || savedLibrary;
+                const currentResults = dreamResultsRef.current || dreamState.results;
                 const removeIds = new Set(targetSet.items.map(it => it.id));
-                const removedItems = savedLibrary.filter(it => removeIds.has(it.id));
-                const nextLibrary = savedLibrary.filter(it => !removeIds.has(it.id));
+                const removeStorageKeys = new Set(targetSet.items.map(it => it.storageKey).filter(Boolean));
+
+                const removedItems = currentLibrary.filter(it => removeIds.has(it.id) || (it.storageKey && removeStorageKeys.has(it.storageKey)));
+                const removedResults = currentResults.filter(it => removeIds.has(it.id) || (it.storageKey && removeStorageKeys.has(it.storageKey)));
+                const nextLibrary = currentLibrary.filter(it => !removeIds.has(it.id) && (!it.storageKey || !removeStorageKeys.has(it.storageKey)));
+                const nextResults = currentResults.filter(it => !removeIds.has(it.id) && (!it.storageKey || !removeStorageKeys.has(it.storageKey)));
+
                 setSavedLibrary(nextLibrary);
+                setDreamState(prev => ({ ...prev, results: nextResults }));
+
+                removedResults.forEach((it) => {
+                    if (it?.url && typeof it.url === 'string' && it.url.startsWith('blob:')) {
+                        URL.revokeObjectURL(it.url);
+                    }
+                });
+
+                const keysToCleanup = [...new Set([...removedItems, ...removedResults].map(it => it.storageKey).filter(Boolean))];
+                for (const key of keysToCleanup) {
+                    await cleanupStorageIfUnreferenced(key, nextLibrary, nextResults);
+                }
+
                 pushDeleteHistory({
                     id: `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                     type: 'set',
@@ -861,9 +890,22 @@
                     onSave: (it) => setSavedLibrary(p => [...p, { ...it, url: null }]),
                     onLoad: (cfg) => { setSteps(cfg); setActiveTab('builder'); },
                     onDelete: async (id) => {
-                        const removed = savedLibrary.find(it => it.id === id);
-                        const nextLibrary = savedLibrary.filter(it => it.id !== id);
+                        const currentLibrary = savedLibraryRef.current || savedLibrary;
+                        const currentResults = dreamResultsRef.current || dreamState.results;
+                        const removed = currentLibrary.find(it => it.id === id);
+                        if (!removed) return;
+                        const targetStorageKey = removed.storageKey;
+                        const nextLibrary = currentLibrary.filter(it => it.id !== id && (!targetStorageKey || it.storageKey !== targetStorageKey));
+                        const nextResults = currentResults.filter(it => it.id !== id && (!targetStorageKey || it.storageKey !== targetStorageKey));
                         setSavedLibrary(nextLibrary);
+                        setDreamState(prev => ({ ...prev, results: nextResults }));
+                        currentResults.forEach((it) => {
+                            const sameRef = it.id === id || (targetStorageKey && it.storageKey === targetStorageKey);
+                            if (sameRef && it?.url && typeof it.url === 'string' && it.url.startsWith('blob:')) {
+                                URL.revokeObjectURL(it.url);
+                            }
+                        });
+                        if (targetStorageKey) await cleanupStorageIfUnreferenced(targetStorageKey, nextLibrary, nextResults);
                         if (removed) {
                             pushDeleteHistory({
                                 id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

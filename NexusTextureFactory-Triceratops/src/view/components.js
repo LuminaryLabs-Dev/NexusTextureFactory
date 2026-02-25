@@ -43,25 +43,12 @@
                     const seed = flipbookConfig?.global?.seedMode === 'random'
                         ? `${item?.id || item?.name || 'preview'}|${Math.random().toString(36).slice(2)}`
                         : (item?.id || item?.name || 'preview');
-                    const analyses = [];
-                    const deltas = [];
-                    let prevAlpha = null;
                     for (let i = 0; i < total; i++) {
                         const cfg = buildAnimatedConfigFrame(base, i, total, seed, flipbookConfig);
                         engine.renderStack(cfg);
-                        analyses.push(engine.analyzeTexture(cfg.length - 1));
-                        const alpha = extractAlphaFromPixels(engine.readPixels(cfg.length - 1));
-                        if (prevAlpha) deltas.push(computeFrameDelta(prevAlpha, alpha));
-                        prevAlpha = alpha;
                         generated.push(engine.getTextureUrl(cfg.length - 1));
                     }
-                    const evalResult = evaluateFlipbookFrames(analyses, deltas, flipbookConfig?.quality);
-                    if (evalResult.pass) {
-                        setFrames(generated);
-                    } else {
-                        setFrames([]);
-                        setFlipbookReject(evalResult.reason.replaceAll('_', ' '));
-                    }
+                    setFrames(generated);
                     setIsL(false);
                 }, 500);
             };
@@ -89,7 +76,8 @@
                                 <div>simple: {fmtScore(item.sScore)}</div>
                                 <div>circle: {fmtScore(item.circularity)}</div>
                                 <div>square: {fmtScore(item.squareness)}</div>
-                                <div>static: {fmtPct(item.staticPct)}</div>
+                                <div>change: {fmtPct(item.changeScore)}</div>
+                                <div>jitter: {fmtPct(item.jitterScore)}</div>
                             </div>
                         </div>
                         <div className="absolute bottom-0 inset-x-0 bg-black/80 p-1 text-[9px] text-gray-300 truncate text-center font-mono py-1.5">{item.name}</div>
@@ -241,28 +229,87 @@
             const [showC, setShowC] = useState(true);
             const results = dVM.state.results || [];
             const liveStart = Math.max(0, results.length - 24);
+            const complexityRangeRef = useRef(null);
+            const complexityDragHandleRef = useRef(null);
+            const complexityMinBound = 1;
+            const complexityMaxBound = 20;
+            const complexitySpan = complexityMaxBound - complexityMinBound;
+            const minComplexity = Math.max(complexityMinBound, Math.min(complexityMaxBound, dVM.params.minComplexity));
+            const maxComplexity = Math.max(complexityMinBound, Math.min(complexityMaxBound, dVM.params.maxComplexity));
+            const minComplexityPercent = ((minComplexity - complexityMinBound) / complexitySpan) * 100;
+            const maxComplexityPercent = ((maxComplexity - complexityMinBound) / complexitySpan) * 100;
+            const onMinComplexityChange = (value) => {
+                const rawMin = Math.max(complexityMinBound, Math.min(parseInt(value), complexityMaxBound));
+                dVM.setParams((p) => {
+                    const nextMax = rawMin > p.maxComplexity ? rawMin : p.maxComplexity;
+                    return { ...p, minComplexity: rawMin, maxComplexity: nextMax };
+                });
+            };
+            const onMaxComplexityChange = (value) => {
+                const rawMax = Math.min(complexityMaxBound, Math.max(parseInt(value), complexityMinBound));
+                dVM.setParams((p) => {
+                    const nextMin = rawMax < p.minComplexity ? rawMax : p.minComplexity;
+                    return { ...p, minComplexity: nextMin, maxComplexity: rawMax };
+                });
+            };
+            const getComplexityFromClientX = (clientX) => {
+                const element = complexityRangeRef.current;
+                if (!element) return minComplexity;
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0) return minComplexity;
+                const t = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+                return Math.round(complexityMinBound + t * complexitySpan);
+            };
+            const applyComplexityFromPointer = (handle, value) => {
+                if (handle === 'min') onMinComplexityChange(value);
+                else onMaxComplexityChange(value);
+            };
+            const onComplexityMouseDown = (e) => {
+                const clickedValue = getComplexityFromClientX(e.clientX);
+                const distToMin = Math.abs(clickedValue - minComplexity);
+                const distToMax = Math.abs(clickedValue - maxComplexity);
+                const nearestHandle = distToMin <= distToMax ? 'min' : 'max';
+                complexityDragHandleRef.current = nearestHandle;
+                applyComplexityFromPointer(nearestHandle, clickedValue);
+                const onMove = (moveEvent) => {
+                    if (!complexityDragHandleRef.current) return;
+                    const value = getComplexityFromClientX(moveEvent.clientX);
+                    applyComplexityFromPointer(complexityDragHandleRef.current, value);
+                };
+                const onUp = () => {
+                    complexityDragHandleRef.current = null;
+                    window.removeEventListener('mousemove', onMove);
+                    window.removeEventListener('mouseup', onUp);
+                };
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+                e.preventDefault();
+            };
             return (
                 <div className="flex flex-col h-full bg-[#0a0a0a] relative">
                     <div className="p-4 border-b border-gray-800 bg-[#151515] z-30 shadow-2xl">
                         <div className="flex justify-between items-center mb-4"><h2 className="text-2xl font-bold text-white tracking-wider font-mono uppercase"><span className="text-purple-500">✦</span> Dream Engine</h2><button onClick={() => setShowC(!showC)} className="px-3 py-1 border border-gray-700 rounded text-[10px] font-bold text-gray-400">CONFIG {showC ? '▲' : '▼'}</button></div>
 	                        {showC && (
-	                            <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 mb-4 grid grid-cols-3 gap-8 overflow-x-auto config-scroll">
-	                                <div className="space-y-3">
-	                                    <div className="text-purple-400 font-bold uppercase text-[10px]">Batching</div>
-	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Batch Size</span><span>{dVM.params.batchSize}</span></div><input type="range" min="1" max="100" step="1" value={dVM.params.batchSize} onChange={(e) => dVM.setParams(p => ({ ...p, batchSize: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
-	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Cycles</span><span>{dVM.params.batchCycles}</span></div><input type="range" min="1" max="50" step="1" value={dVM.params.batchCycles} onChange={(e) => dVM.setParams(p => ({ ...p, batchCycles: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
-	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Gen Workers</span><span>{dVM.params.generationWorkers}</span></div><input type="range" min="1" max="5" step="1" value={dVM.params.generationWorkers} onChange={(e) => dVM.setParams(p => ({ ...p, generationWorkers: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
-	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Pack Workers</span><span>{dVM.params.packagingWorkers}</span></div><input type="range" min="1" max="5" step="1" value={dVM.params.packagingWorkers} onChange={(e) => dVM.setParams(p => ({ ...p, packagingWorkers: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
-	                                </div>
-	                                <div className="space-y-3">
-	                                    <div className="text-blue-400 font-bold uppercase text-[10px]">Complexity Range</div>
-	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Min Steps</span><span>{dVM.params.minComplexity}</span></div><input type="range" min="1" max="10" step="1" value={dVM.params.minComplexity} onChange={(e) => dVM.setParams(p => ({ ...p, minComplexity: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
-	                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400"><span>Max Steps</span><span>{dVM.params.maxComplexity}</span></div><input type="range" min="1" max="10" step="1" value={dVM.params.maxComplexity} onChange={(e) => dVM.setParams(p => ({ ...p, maxComplexity: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
-	                                </div>
-                                <div className="space-y-3">
-                                    <div className="text-orange-400 font-bold uppercase text-[10px]">Playback</div>
-                                    <div className="flex flex-col gap-1"><div className="flex justify-between text-gray-400 text-[10px]"><span>Preview Frames</span><span>{dVM.params.flipFrames}</span></div><input type="range" min="4" max="16" step="4" value={dVM.params.flipFrames} onChange={(e) => dVM.setParams(p => ({ ...p, flipFrames: parseInt(e.target.value) }))} className="slider-thumb w-full" /></div>
-                                </div>
+	                            <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 mb-4 overflow-x-auto config-scroll">
+                                    <div className="grid grid-cols-3 gap-8">
+                                        <div className="flex flex-col gap-1">
+                                            <div className="flex justify-between text-gray-400"><span>Batch Size</span><span>{dVM.params.batchSize}</span></div>
+                                            <input type="range" min="1" max="100" step="1" value={dVM.params.batchSize} onChange={(e) => dVM.setParams(p => ({ ...p, batchSize: parseInt(e.target.value) }))} className="slider-thumb w-full" />
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                            <div className="flex justify-between text-gray-400"><span>Cycles</span><span>{dVM.params.batchCycles}</span></div>
+                                            <input type="range" min="1" max="50" step="1" value={dVM.params.batchCycles} onChange={(e) => dVM.setParams(p => ({ ...p, batchCycles: parseInt(e.target.value) }))} className="slider-thumb w-full" />
+                                        </div>
+	                                    <div className="flex flex-col gap-1">
+	                                        <div className="flex justify-between text-gray-400"><span>Complexity</span><span>{minComplexity}-{maxComplexity}</span></div>
+                                            <div ref={complexityRangeRef} className="relative h-4 cursor-pointer" onMouseDown={onComplexityMouseDown}>
+                                                <div className="absolute top-1/2 left-0 right-0 h-1 -translate-y-1/2 rounded bg-[#333]"></div>
+                                                <div className="absolute top-1/2 h-1 -translate-y-1/2 rounded bg-blue-500" style={{ left: `${minComplexityPercent}%`, right: `${100 - maxComplexityPercent}%` }}></div>
+                                                <div className="absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500" style={{ left: `${minComplexityPercent}%` }}></div>
+                                                <div className="absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500" style={{ left: `${maxComplexityPercent}%` }}></div>
+                                            </div>
+	                                    </div>
+                                    </div>
                             </div>
                         )}
                         <input type="text" value={dVM.params.prompt || ""} onChange={(e) => dVM.setParams(p => ({ ...p, prompt: e.target.value }))} placeholder="Filter description..." className="w-full bg-[#0a0a0a] border border-gray-700 rounded px-4 py-2 text-sm text-white focus:border-purple-500 outline-none" />
@@ -356,18 +403,20 @@
                         </div>
                         <div className="bg-[#1a1a1a] border border-gray-800 rounded overflow-hidden">
                             <div className="flex items-center justify-between px-3 py-2 bg-[#202020]">
-                                <button onClick={() => filtersVM.toggleQualityExpanded('staticMotion')} className="text-sm font-bold text-white">Motion Static %</button>
+                                <button onClick={() => filtersVM.toggleQualityExpanded('temporalChange')} className="text-sm font-bold text-white">Temporal Change</button>
                                 <div className="flex items-center gap-2">
-                                    <button onClick={() => filtersVM.toggleQualityEnabled('staticMotion')} className={`text-[10px] px-2 py-1 rounded font-bold ${quality.staticMotion?.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{quality.staticMotion?.enabled ? 'ON' : 'OFF'}</button>
-                                    <button onClick={() => filtersVM.toggleQualityExpanded('staticMotion')} className="text-xs text-gray-400 w-6">{quality.staticMotion?.expanded ? '▼' : '▶'}</button>
+                                    <button onClick={() => filtersVM.toggleQualityEnabled('temporalChange')} className={`text-[10px] px-2 py-1 rounded font-bold ${quality.temporalChange?.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{quality.temporalChange?.enabled ? 'ON' : 'OFF'}</button>
+                                    <button onClick={() => filtersVM.toggleQualityExpanded('temporalChange')} className="text-xs text-gray-400 w-6">{quality.temporalChange?.expanded ? '▼' : '▶'}</button>
                                 </div>
                             </div>
-                            {quality.staticMotion?.expanded && (
+                            {quality.temporalChange?.expanded && (
                                 <div className="p-3 text-xs space-y-3">
-                                    <div className="flex justify-between"><span className="text-gray-400">Min Static %</span><span>{(quality.staticMotion.min * 100).toFixed(0)}%</span></div>
-                                    <input type="range" min="0" max="1" step="0.01" value={quality.staticMotion.min} onChange={(e) => filtersVM.updateQuality('staticMotion', 'min', parseFloat(e.target.value))} className="w-full slider-thumb" />
-                                    <div className="flex justify-between"><span className="text-gray-400">Max Static %</span><span>{(quality.staticMotion.max * 100).toFixed(0)}%</span></div>
-                                    <input type="range" min="0" max="1" step="0.01" value={quality.staticMotion.max} onChange={(e) => filtersVM.updateQuality('staticMotion', 'max', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                    <div className="flex justify-between"><span className="text-gray-400">Min Change</span><span>{(quality.temporalChange.minChange * 100).toFixed(0)}%</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.temporalChange.minChange} onChange={(e) => filtersVM.updateQuality('temporalChange', 'minChange', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                    <div className="flex justify-between"><span className="text-gray-400">Max Change</span><span>{(quality.temporalChange.maxChange * 100).toFixed(0)}%</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.temporalChange.maxChange} onChange={(e) => filtersVM.updateQuality('temporalChange', 'maxChange', parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                    <div className="flex justify-between"><span className="text-gray-400">Max Jitter</span><span>{(quality.temporalChange.maxJitter * 100).toFixed(0)}%</span></div>
+                                    <input type="range" min="0" max="1" step="0.01" value={quality.temporalChange.maxJitter} onChange={(e) => filtersVM.updateQuality('temporalChange', 'maxJitter', parseFloat(e.target.value))} className="w-full slider-thumb" />
                                 </div>
                             )}
                         </div>
@@ -500,7 +549,8 @@
                                 </div>
                                 <div className="flex flex-col gap-1">
                                     <label className="text-gray-400">Sort By</label>
-                                    <select value={cfg.sortBy || 'name'} onChange={(e) => setCfg({ sortBy: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
+                                    <select value={cfg.sortBy || 'none'} onChange={(e) => setCfg({ sortBy: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
+                                        <option value="none">None</option>
                                         <option value="name">Name</option>
                                         <option value="density">Alpha Density</option>
                                         <option value="simplicity">Simplicity</option>
@@ -846,14 +896,14 @@ void main() {
             );
         }
 
-        function SettingsTab({ uiVM }) {
+        function SettingsTab({ uiVM, dVM }) {
             return (
                 <div className="flex flex-col h-full bg-[#111] p-6">
                     <div className="mb-6">
                         <h2 className="text-xl font-bold text-white">SETTINGS</h2>
                         <p className="text-xs text-gray-400 mt-1">Global runtime and preview behavior.</p>
                     </div>
-                    <div className="max-w-xl bg-[#1a1a1a] border border-gray-800 rounded p-4">
+                    <div className="max-w-xl bg-[#1a1a1a] border border-gray-800 rounded p-4 space-y-4">
                         <div className="flex items-center justify-between">
                             <div>
                                 <div className="text-sm font-bold text-white">Auto Animated Frames</div>
@@ -866,6 +916,27 @@ void main() {
                                     <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${uiVM.autoAnimateFrames ? 'translate-x-5' : ''}`}></div>
                                 </div>
                             </label>
+                        </div>
+                        <div className="flex flex-col gap-1 text-xs">
+                            <div className="flex justify-between text-gray-400">
+                                <span>Playback Frame Count</span>
+                                <span>{dVM?.params?.flipFrames ?? 16}</span>
+                            </div>
+                            <input type="range" min="4" max="16" step="4" value={dVM?.params?.flipFrames ?? 16} onChange={(e) => dVM?.setParams(p => ({ ...p, flipFrames: parseInt(e.target.value) }))} className="w-full slider-thumb" />
+                        </div>
+                        <div className="flex flex-col gap-1 text-xs">
+                            <div className="flex justify-between text-gray-400">
+                                <span>Gen Workers</span>
+                                <span>{dVM?.params?.generationWorkers ?? 5}</span>
+                            </div>
+                            <input type="range" min="1" max="5" step="1" value={dVM?.params?.generationWorkers ?? 5} onChange={(e) => dVM?.setParams(p => ({ ...p, generationWorkers: parseInt(e.target.value) }))} className="w-full slider-thumb" />
+                        </div>
+                        <div className="flex flex-col gap-1 text-xs">
+                            <div className="flex justify-between text-gray-400">
+                                <span>Pack Workers</span>
+                                <span>{dVM?.params?.packagingWorkers ?? 5}</span>
+                            </div>
+                            <input type="range" min="1" max="5" step="1" value={dVM?.params?.packagingWorkers ?? 5} onChange={(e) => dVM?.setParams(p => ({ ...p, packagingWorkers: parseInt(e.target.value) }))} className="w-full slider-thumb" />
                         </div>
                     </div>
                 </div>
@@ -977,9 +1048,15 @@ void main() {
         function EditableSetName({ set, libVM }) {
             const [isE, setIsE] = useState(false); const [lN, setLN] = useState(set.name); const iR = useRef(null);
             useEffect(() => { if (isE) iR.current?.focus(); }, [isE]);
-            const hC = () => { setIsE(false); if (lN !== set.name) libVM.renameSet(set.baseKey || set.name, lN); };
+            useEffect(() => { setLN(set.name); }, [set.name]);
+            const hC = () => {
+                const nextName = (lN || '').trim();
+                setIsE(false);
+                if (!nextName || nextName === set.name) return;
+                libVM.renameSet(set, nextName);
+            };
             if (isE) return <input ref={iR} className="bg-[#333] border border-blue-500 rounded px-2 py-0.5 text-white font-bold text-sm outline-none" value={lN} onChange={(e) => setLN(e.target.value)} onBlur={hC} onKeyDown={(e) => e.key === 'Enter' && hC()} />;
-            return <h3 onClick={() => setIsE(true)} className="text-white font-bold cursor-pointer hover:text-blue-400 transition-colors group flex items-center gap-2 text-sm">{set.name} <span className="opacity-0 group-hover:opacity-100 text-[8px] bg-blue-600/30 px-1 rounded text-blue-300">EDIT</span> <span className="text-gray-500 text-xs font-normal">({set.items.length})</span></h3>;
+            return <h3 onClick={() => { setLN(set.name); setIsE(true); }} className="text-white font-bold cursor-pointer hover:text-blue-400 transition-colors group flex items-center gap-2 text-sm">{set.name} <span className="opacity-0 group-hover:opacity-100 text-[8px] bg-blue-600/30 px-1 rounded text-blue-300">EDIT</span> <span className="text-gray-500 text-xs font-normal">({set.items.length})</span></h3>;
         }
 
         // ==========================================
