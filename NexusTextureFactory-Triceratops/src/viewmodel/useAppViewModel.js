@@ -22,12 +22,9 @@
                 sortDir: 'asc'
             });
             const [flipbookConfig, setFlipbookConfig] = useState(createDefaultFlipbookConfig());
-	            const [dreamParams, setDreamParams] = useState({ batchSize: 20, batchCycles: 1, generationWorkers: 5, packagingWorkers: 5, refineCycles: 1, minDensity: 0.15, maxDensity: 0.75, minSimplicity: 0.1, maxSimplicity: 0.9, varianceStrictness: 0.1, randStrength: 0.5, flipFrames: 16, prompt: "", minComplexity: 5, maxComplexity: 10, autoDream: false });
+	            const [dreamParams, setDreamParams] = useState({ overdrive: 0, generationWorkers: 5, packagingWorkers: 5, refineCycles: 1, minDensity: 0.15, maxDensity: 0.75, minSimplicity: 0.1, maxSimplicity: 0.9, varianceStrictness: 0.1, randStrength: 0.5, flipFrames: 16, prompt: "", minComplexity: 5, maxComplexity: 10, resultFillMode: 'slide' });
 
-            const autoDreamRef = useRef(false);
-            useEffect(() => { autoDreamRef.current = dreamParams.autoDream; }, [dreamParams.autoDream]);
-
-		            const [isDreaming, setIsDreaming] = useState(false); const [dreamState, setDreamState] = useState({ results: [], rejectedIds: [], phase: '', rejectLabel: '', pendingAccepted: 0, pendingAttempts: 0, pendingRejected: 0 });
+		            const [isDreaming, setIsDreaming] = useState(false); const [dreamState, setDreamState] = useState({ results: [], rejectedIds: [], phase: '', rejectLabel: '', pendingAccepted: 0, pendingAttempts: 0, pendingRejected: 0, pendingBackfill: 0, activeGenWorkers: 0, activeBackfillWorkers: 0, stageRejects: { alpha: 0, simplicity: 0, shape: 0, similarity: 0, temporal: 0, other: 0 } });
 	            const [savedLibrary, setSavedLibrary] = useState([]); const [exportingSetId, setExportingSetId] = useState(null); const [exportPhase, setExportPhase] = useState(''); const [exportError, setExportError] = useState('');
 	            const [deleteHistory, setDeleteHistory] = useState([]);
 	            const eR = useRef(null); const bER = useRef(null);
@@ -37,12 +34,37 @@
 	            const dreamResultsRef = useRef(dreamState.results);
 	            const deleteHistoryRef = useRef(deleteHistory);
 	            const persistTimerRef = useRef(null);
+            const dreamRunIdRef = useRef(0);
+            const dreamStopRequestedRef = useRef(false);
 
 	            useEffect(() => { eR.current = new TextureEngine(256, 256); bER.current = new TextureEngine(64, 64); }, []);
 	            useEffect(() => { if (!eR.current) return; eR.current.renderStack(steps); setPreviewUrls(steps.map((_, i) => eR.current.getTextureUrl(i))); setFinalPreviewUrl(eR.current.getTextureUrl(steps.length - 1)); }, [steps]);
 	            useEffect(() => { savedLibraryRef.current = savedLibrary; }, [savedLibrary]);
 	            useEffect(() => { dreamResultsRef.current = dreamState.results; }, [dreamState.results]);
 	            useEffect(() => { deleteHistoryRef.current = deleteHistory; }, [deleteHistory]);
+            useEffect(() => {
+                setDreamState(prev => {
+                    const prevResults = Array.isArray(prev.results) ? prev.results : [];
+                    const prevReal = prevResults.filter(it => it && !it.__slotOpen && it.id);
+                    const prevById = new Map(prevReal.map(it => [it.id, it]));
+                    const nextResults = savedLibrary.map(libItem => {
+                        const prevItem = prevById.get(libItem.id);
+                        if (prevItem && prevItem.url) return { ...libItem, url: prevItem.url };
+                        return { ...libItem, url: null };
+                    });
+                    if (nextResults.length === prevResults.length) {
+                        let sameOrder = true;
+                        for (let i = 0; i < nextResults.length; i++) {
+                            if (nextResults[i]?.id !== prevResults[i]?.id) {
+                                sameOrder = false;
+                                break;
+                            }
+                        }
+                        if (sameOrder) return prev;
+                    }
+                    return { ...prev, results: nextResults };
+                });
+            }, [savedLibrary]);
                 const mergeFlipbookConfig = useCallback((incoming) => {
                     const base = createDefaultFlipbookConfig();
                     if (!incoming || typeof incoming !== 'object') return base;
@@ -110,11 +132,15 @@
                         if (parsed && typeof parsed === 'object') {
                             const nextMinComplexity = Math.max(1, Math.min(20, parseInt(parsed.minComplexity ?? 5)));
                             const nextMaxComplexity = Math.max(nextMinComplexity, Math.min(20, parseInt(parsed.maxComplexity ?? 10)));
+                            const nextOverdrive = Math.max(0, Math.min(1, Number(parsed.overdrive ?? 0)));
+                            const nextResultFillMode = parsed.resultFillMode === 'slot' ? 'slot' : 'slide';
                             setDreamParams(prev => ({
                                 ...prev,
                                 ...parsed,
+                                overdrive: nextOverdrive,
                                 minComplexity: nextMinComplexity,
-                                maxComplexity: nextMaxComplexity
+                                maxComplexity: nextMaxComplexity,
+                                resultFillMode: nextResultFillMode
                             }));
                         }
                     }
@@ -196,7 +222,7 @@
                 const keys = Object.keys(ts).sort((a, b) => a.localeCompare(b));
                 const maxItemsPerPack = Math.max(1, parseInt(packConfig.maxItemsPerPack || 50));
                 keys.forEach(k => {
-                    const its = [...ts[k]].sort(cmp);
+                    const its = packConfig.sortBy === 'none' ? [...ts[k]] : [...ts[k]].sort(cmp);
                     if (its.length <= maxItemsPerPack) {
                         const singleName = packConfig.groupBy === 'volume_fill' ? 'Volume 1' : k;
                         final.push({ id: k, baseKey: k, name: singleName, items: its });
@@ -216,6 +242,7 @@
 
             const reorganizePacks = () => {
                 setSavedLibrary(prev => {
+                    if ((packConfig.sortBy || 'none') === 'none') return prev;
                     const normalizeName = (item) => String(item?.name || 'Misc');
                     const getGroupKey = (item) => {
                         if (packConfig.groupBy === 'volume_fill') return '__all__';
@@ -246,6 +273,76 @@
                         if (gcmp !== 0) return gcmp;
                         return cmp(a, b);
                     });
+                });
+            };
+
+            const moveArrayItem = (arr, fromIndex, toIndex) => {
+                if (!Array.isArray(arr)) return arr;
+                if (fromIndex === toIndex) return arr;
+                if (fromIndex < 0 || fromIndex >= arr.length) return arr;
+                if (toIndex < 0 || toIndex >= arr.length) return arr;
+                const next = [...arr];
+                const [item] = next.splice(fromIndex, 1);
+                next.splice(toIndex, 0, item);
+                return next;
+            };
+
+            const isSlotFillMode = (mode) => mode === 'slot';
+            const compactResultsByBottomFill = (results, shouldRemove) => {
+                if (!Array.isArray(results)) return results;
+                const next = results.filter(Boolean).slice();
+                const target = (item) => !!item?.__slotOpen || !!shouldRemove(item);
+                let index = 0;
+                while (index < next.length) {
+                    if (!target(next[index])) {
+                        index++;
+                        continue;
+                    }
+                    let tail = next.length - 1;
+                    while (tail > index && target(next[tail])) {
+                        next.pop();
+                        tail--;
+                    }
+                    if (tail > index) {
+                        next[index] = next[tail];
+                        next.pop();
+                        index++;
+                    } else {
+                        next.pop();
+                    }
+                }
+                return next;
+            };
+            const mergeResultsByFillMode = (existingResults, incomingResults, fillMode) => {
+                if (!Array.isArray(existingResults) || !Array.isArray(incomingResults) || incomingResults.length === 0) return existingResults;
+                if (!isSlotFillMode(fillMode)) return [...existingResults, ...incomingResults];
+                const compacted = compactResultsByBottomFill(existingResults, () => false);
+                return [...compacted, ...incomingResults];
+            };
+            const removeResultsByFillMode = (results, shouldRemove, fillMode) => {
+                if (!Array.isArray(results)) return results;
+                if (!isSlotFillMode(fillMode)) return results.filter(it => !shouldRemove(it));
+                return compactResultsByBottomFill(results, shouldRemove);
+            };
+
+            const reorderByDrag = (sourceId, targetId) => {
+                const cfg = packConfig || {};
+                const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
+                if (!reorderEnabled) return;
+                if (!sourceId || !targetId || sourceId === targetId) return;
+
+                setSavedLibrary(prev => {
+                    const fromIndex = prev.findIndex(it => it.id === sourceId);
+                    const toIndex = prev.findIndex(it => it.id === targetId);
+                    if (fromIndex < 0 || toIndex < 0) return prev;
+                    return moveArrayItem(prev, fromIndex, toIndex);
+                });
+
+                setDreamState(prev => {
+                    const fromIndex = prev.results.findIndex(it => it.id === sourceId);
+                    const toIndex = prev.results.findIndex(it => it.id === targetId);
+                    if (fromIndex < 0 || toIndex < 0) return prev;
+                    return { ...prev, results: moveArrayItem(prev.results, fromIndex, toIndex) };
                 });
             };
 
@@ -281,42 +378,50 @@
                     universal: { ...m.universal }
                 }));
 
-            const passesQualityFilters = (analysis, recentHashes) => {
+            const getBestSimilarity = (analysisHash, recentHashes, historySize) => {
+                if (!analysisHash || !recentHashes.length) return 0;
+                const compareList = recentHashes.slice(-Math.max(1, historySize));
+                let bestSimilarity = 0;
+                for (const hash of compareList) {
+                    const distance = hammingDistance(analysisHash, hash);
+                    const similarity = 1.0 - (distance / 64.0);
+                    if (similarity > bestSimilarity) bestSimilarity = similarity;
+                }
+                return bestSimilarity;
+            };
+
+            const runStageAlphaAndSimplicityGate = (analysis) => {
                 const alphaFilter = qualityFilters.alpha;
-                if (alphaFilter.enabled && (analysis.density < alphaFilter.min || analysis.density > alphaFilter.max)) return false;
-
+                if (alphaFilter.enabled && (analysis.density < alphaFilter.min || analysis.density > alphaFilter.max)) return { pass: false, reason: 'alpha' };
                 const simplicityFilter = qualityFilters.simplicity;
-                if (simplicityFilter.enabled && (analysis.sScore < simplicityFilter.min || analysis.sScore > simplicityFilter.max)) return false;
+                if (simplicityFilter.enabled && (analysis.sScore < simplicityFilter.min || analysis.sScore > simplicityFilter.max)) return { pass: false, reason: 'simplicity' };
+                return { pass: true, reason: '' };
+            };
 
-                const temporalFilter = qualityFilters.temporalChange;
-                if (temporalFilter.enabled) {
-                    const changeScore = Number(analysis.changeScore || 0);
-                    const jitterScore = Number(analysis.jitterScore || 0);
-                    if (changeScore < temporalFilter.minChange || changeScore > temporalFilter.maxChange) return false;
-                    if (jitterScore > temporalFilter.maxJitter) return false;
-                }
-
+            const runStageShapeGate = (analysis) => {
                 const shapeFilter = qualityFilters.shape;
-                if (shapeFilter.enabled) {
-                    if (analysis.circularity < shapeFilter.minCircularity) return false;
-                    if (analysis.circularity > shapeFilter.maxCircularity) return false;
-                    if (analysis.squareness < shapeFilter.minSquareness) return false;
-                    if (analysis.squareness > shapeFilter.maxSquareness) return false;
-                }
+                if (!shapeFilter.enabled) return { pass: true, reason: '' };
+                if (analysis.circularity < shapeFilter.minCircularity || analysis.circularity > shapeFilter.maxCircularity) return { pass: false, reason: 'shape' };
+                if (analysis.squareness < shapeFilter.minSquareness || analysis.squareness > shapeFilter.maxSquareness) return { pass: false, reason: 'shape' };
+                return { pass: true, reason: '' };
+            };
 
+            const runStageSimilarityGate = (analysis, recentHashes) => {
                 const similarityFilter = qualityFilters.similarity;
-                if (similarityFilter.enabled && recentHashes.length > 0 && analysis.hash) {
-                    const compareList = recentHashes.slice(-Math.max(1, similarityFilter.historySize));
-                    let bestSimilarity = 0;
-                    for (const hash of compareList) {
-                        const distance = hammingDistance(analysis.hash, hash);
-                        const similarity = 1.0 - (distance / 64.0);
-                        if (similarity > bestSimilarity) bestSimilarity = similarity;
-                    }
-                    if (bestSimilarity > similarityFilter.maxSimilarity) return false;
-                }
+                if (!similarityFilter.enabled || !analysis.hash) return { pass: true, reason: '', similarity: 0 };
+                const bestSimilarity = getBestSimilarity(analysis.hash, recentHashes, similarityFilter.historySize);
+                if (bestSimilarity > similarityFilter.maxSimilarity) return { pass: false, reason: 'similarity', similarity: bestSimilarity };
+                return { pass: true, reason: '', similarity: bestSimilarity };
+            };
 
-                return true;
+            const runStageTemporalGate = (analysis) => {
+                const temporalFilter = qualityFilters.temporalChange;
+                if (!temporalFilter.enabled) return { pass: true, reason: '' };
+                const changeScore = Number(analysis.changeScore || 0);
+                const jitterScore = Number(analysis.jitterScore || 0);
+                if (changeScore < temporalFilter.minChange || changeScore > temporalFilter.maxChange) return { pass: false, reason: 'temporal' };
+                if (jitterScore > temporalFilter.maxJitter) return { pass: false, reason: 'temporal' };
+                return { pass: true, reason: '' };
             };
 
             const computeTemporalMetricsForConfig = (engine, baseConfig, frameCount, seed, renderOptions) => {
@@ -463,134 +568,295 @@
                 return () => window.removeEventListener('keydown', onKeyDown);
             }, [undoDelete]);
 
+            const clampOverdrive = (value) => Math.max(0, Math.min(1, Number(value || 0)));
+            const createStageRejectCounters = () => ({ alpha: 0, simplicity: 0, shape: 0, similarity: 0, temporal: 0, other: 0 });
+            const countReject = (counters, reason) => {
+                if (reason && Object.prototype.hasOwnProperty.call(counters, reason)) counters[reason]++;
+                else counters.other++;
+            };
+            const getOverdriveWorkerTarget = (maxWorkers, overdrive) => {
+                const safeMax = Math.max(1, maxWorkers);
+                const standardWorkers = Math.min(2, safeMax);
+                const v = clampOverdrive(overdrive);
+                return Math.max(1, Math.min(safeMax, Math.round(standardWorkers + (safeMax - standardWorkers) * v)));
+            };
+
+            const handleStopDream = () => {
+                if (!isDreaming) return;
+                dreamStopRequestedRef.current = true;
+                setDreamState(p => ({ ...p, phase: 'Stopping...' }));
+            };
+
             const handleDream = async () => {
-                if (!bER.current || isDreaming) return; setIsDreaming(true); let existingNames = new Set(savedLibrary.map(i => i.name));
-                setDreamState(p => ({ ...p, pendingAccepted: 0, pendingAttempts: 0, pendingRejected: 0 }));
-                const acceptedHashes = savedLibrary.map(i => i.hash).filter(Boolean);
-                const hasLibrarySamples = savedLibrary.length > 0;
+                if (!bER.current || isDreaming) return;
+                const runId = Date.now();
+                dreamRunIdRef.current = runId;
+                dreamStopRequestedRef.current = false;
+                setIsDreaming(true);
+
+                const initialOverdrive = clampOverdrive(dreamParams.overdrive);
+                const maxGenerationWorkers = Math.max(1, Math.min(MAX_GENERATION_WORKERS, parseInt(dreamParams.generationWorkers || 1)));
+                const maxBackfillWorkers = Math.max(1, Math.min(MAX_PACKAGING_WORKERS, parseInt(dreamParams.packagingWorkers || 1)));
+                let adaptiveGenWorkers = getOverdriveWorkerTarget(maxGenerationWorkers, initialOverdrive);
+                let adaptiveBackfillWorkers = getOverdriveWorkerTarget(maxBackfillWorkers, initialOverdrive);
+                const temporalFrameCount = Math.max(4, Math.min(8, Math.round((dreamParams.flipFrames || 16) * 0.5)));
+                const commitChunkSize = Math.max(6, Math.round(6 + initialOverdrive * 24));
+                const maxAttemptsPerJob = 6;
+                const isEngineContextLost = (engine) => {
+                    const gl = engine?.gl;
+                    if (!gl) return true;
+                    try { return typeof gl.isContextLost === 'function' ? gl.isContextLost() : false; }
+                    catch (_) { return true; }
+                };
+                const ensureGenerationEngine = (slot) => {
+                    const list = generationEnginesRef.current;
+                    const engine = list[slot];
+                    if (!engine || isEngineContextLost(engine)) {
+                        list[slot] = new TextureEngine(64, 64);
+                    }
+                    return list[slot];
+                };
+
+                const snapshotLibrary = savedLibraryRef.current || [];
+                let existingNames = new Set(snapshotLibrary.map(i => i.name));
+                const acceptedHashes = snapshotLibrary.map(i => i.hash).filter(Boolean);
+                const stageRejects = createStageRejectCounters();
+                let acceptedTotal = 0;
+                let attemptedTotal = 0;
+                let rejectedTotal = 0;
+                let loopCounter = 0;
+                let lastDiagnosticsAt = 0;
+                let lastCommitAt = performance.now();
+                const pendingLibraryItems = [];
+                const pendingResultItems = [];
+                const backfillQueue = [];
+
+                const hasLibrarySamples = snapshotLibrary.length > 0;
                 const baseOps = ['NOISE_PERLIN', 'NOISE_WORLEY', 'FRACTAL', 'SPIRAL', 'THRESHOLD', 'VIGNETTE', 'SMEAR', 'DOMAIN_WARP', 'RADIAL_WARP', 'KALEIDOSCOPE_PLUS', 'MORPH_DILATE_ERODE', 'MORPH_OPEN_CLOSE', 'EDGE_SOBEL', 'OUTLINE_ALPHA', 'POSTERIZE_ALPHA', 'DISTANCE_BANDS'];
                 const libraryOps = hasLibrarySamples ? ['LIBRARY_STAMP_SCATTER', 'LIBRARY_DISPLACE'] : [];
                 const ops = [...baseOps, ...libraryOps];
                 const enabledFilterTemplates = buildEnabledFilterSteps();
                 const libraryRenderCache = [];
+
+                const updateDiagnostics = (phase, force = false) => {
+                    const now = performance.now();
+                    if (!force && now - lastDiagnosticsAt < 120) return;
+                    lastDiagnosticsAt = now;
+                    setDreamState(p => ({
+                        ...p,
+                        phase,
+                        pendingAccepted: acceptedTotal,
+                        pendingAttempts: attemptedTotal,
+                        pendingRejected: rejectedTotal,
+                        pendingBackfill: backfillQueue.length,
+                        activeGenWorkers: adaptiveGenWorkers,
+                        activeBackfillWorkers: adaptiveBackfillWorkers,
+                        stageRejects: { ...stageRejects }
+                    }));
+                };
+
+                const flushPendingItems = (force = false) => {
+                    if (!force && pendingResultItems.length < commitChunkSize && performance.now() - lastCommitAt < 250) return;
+                    if (!pendingResultItems.length && !pendingLibraryItems.length) return;
+                    const toLibrary = pendingLibraryItems.splice(0, pendingLibraryItems.length);
+                    const toResults = pendingResultItems.splice(0, pendingResultItems.length);
+                    if (toLibrary.length) setSavedLibrary(prev => [...prev, ...toLibrary]);
+                    if (toResults.length) {
+                        setDreamState(p => ({
+                            ...p,
+                            results: mergeResultsByFillMode(p.results, toResults, dreamParams.resultFillMode),
+                            phase: p.phase,
+                            pendingAccepted: acceptedTotal,
+                            pendingAttempts: attemptedTotal,
+                            pendingRejected: rejectedTotal,
+                            pendingBackfill: backfillQueue.length,
+                            activeGenWorkers: adaptiveGenWorkers,
+                            activeBackfillWorkers: adaptiveBackfillWorkers,
+                            stageRejects: { ...stageRejects }
+                        }));
+                    }
+                    lastCommitAt = performance.now();
+                };
+
+                const buildRandomConfig = () => {
+                    const count = Math.floor(Math.random() * (dreamParams.maxComplexity - dreamParams.minComplexity + 1)) + dreamParams.minComplexity;
+                    const ns = [];
+                    const gens = ['BASE_SHAPE', 'BASE_GRAD'];
+                    const baseKey = gens[Math.floor(Math.random() * gens.length)];
+                    const baseDef = STEP_TYPES[baseKey];
+                    const baseParams = { ...baseDef.params };
+                    baseDef.controls.forEach(c => { if (c.type === 'slider') baseParams[c.key] = c.min + Math.random() * (c.max - c.min); });
+                    ns.push({ id: 'b' + Date.now(), typeDef: baseDef, active: true, blendMode: 0, params: baseParams, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
+                    for (let i = 0; i < count; i++) {
+                        const key = ops[Math.floor(Math.random() * ops.length)];
+                        const def = STEP_TYPES[key];
+                        const params = { ...def.params };
+                        def.controls.forEach(c => { if (c.type === 'slider') params[c.key] = c.min + Math.random() * (c.max - c.min); });
+                        ns.push({ id: 'o' + Date.now() + i, typeDef: def, active: true, blendMode: def.cat === 'GEN' ? 0 : (def.cat === 'ERODE' ? 1 : 2), params, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
+                    }
+                    enabledFilterTemplates.forEach(s => ns.push({ ...s, id: `${s.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }));
+                    const vignetteDef = STEP_TYPES.VIGNETTE;
+                    ns.push({ id: 'v' + Date.now(), typeDef: vignetteDef, active: true, blendMode: 2, params: { ...vignetteDef.params, p1: 1, p2: 0.45, p3: 0.2 }, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
+                    return ns;
+                };
+
                 if (hasLibrarySamples) {
-                    const cacheEngine = new TextureEngine(64, 64);
-                    const maxLibrarySamples = Math.min(savedLibrary.length, 24);
+                    // Avoid creating extra WebGL contexts; reuse slot 0 engine to build cache.
+                    if (generationEnginesRef.current.length < 1) generationEnginesRef.current.push(new TextureEngine(64, 64));
+                    const cacheEngine = ensureGenerationEngine(0);
+                    const maxLibrarySamples = Math.min(snapshotLibrary.length, 24);
                     for (let i = 0; i < maxLibrarySamples; i++) {
-                        const randomLibraryItem = savedLibrary[Math.floor(Math.random() * savedLibrary.length)];
+                        const randomLibraryItem = snapshotLibrary[Math.floor(Math.random() * snapshotLibrary.length)];
                         if (!randomLibraryItem?.config?.length) continue;
                         cacheEngine.renderStack(randomLibraryItem.config);
                         libraryRenderCache.push(cacheEngine.getTextureCanvas(randomLibraryItem.config.length - 1));
                     }
                 }
-                const gRS = () => {
-                    const count = Math.floor(Math.random() * (dreamParams.maxComplexity - dreamParams.minComplexity + 1)) + dreamParams.minComplexity;
-                    const ns = []; const gens = ['BASE_SHAPE', 'BASE_GRAD'];
-                    const bK = gens[Math.floor(Math.random() * gens.length)]; const bD = STEP_TYPES[bK]; const bP = { ...bD.params };
-                    bD.controls.forEach(c => { if (c.type === 'slider') bP[c.key] = c.min + Math.random() * (c.max - c.min); });
-                    ns.push({ id: 'b' + Date.now(), typeDef: bD, active: true, blendMode: 0, params: bP, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
-                    for (let i = 0; i < count; i++) {
-                        const k = ops[Math.floor(Math.random() * ops.length)]; const d = STEP_TYPES[k]; const p = { ...d.params };
-                        d.controls.forEach(c => { if (c.type === 'slider') p[c.key] = c.min + Math.random() * (c.max - c.min); });
-                        ns.push({ id: 'o' + Date.now() + i, typeDef: d, active: true, blendMode: d.cat === 'GEN' ? 0 : (d.cat === 'ERODE' ? 1 : 2), params: p, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
-                    }
-                    enabledFilterTemplates.forEach(s => ns.push({ ...s, id: `${s.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }));
-                    const vD = STEP_TYPES.VIGNETTE; ns.push({ id: 'v' + Date.now(), typeDef: vD, active: true, blendMode: 2, params: { ...vD.params, p1: 1, p2: 0.45, p3: 0.2 }, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
-                    return ns;
-                };
-                try {
-                    const cycles = Math.max(1, dreamParams.batchCycles);
-                    let acceptedTotal = 0;
-                    let attemptedTotal = 0;
-                    let rejectedTotal = 0;
-                    let lastDiagSyncAt = performance.now();
-                    const syncDiagnostics = (force = false) => {
-                        const now = performance.now();
-                        if (!force && now - lastDiagSyncAt < 120) return;
-                        lastDiagSyncAt = now;
-                        setDreamState(p => ({ ...p, pendingAccepted: acceptedTotal, pendingAttempts: attemptedTotal, pendingRejected: rejectedTotal }));
-                    };
-                    for (let b = 0; b < cycles; b++) {
-                        setDreamState(p => ({ ...p, phase: `Batch ${b + 1}...` })); const batch = [];
-                        const pendingResults = [];
-                        let lastFlushAt = performance.now();
-                        let flushedOnce = false;
-                        const flushPendingResults = () => {
-                            if (pendingResults.length === 0) return;
-                            const toAppend = pendingResults.splice(0, pendingResults.length);
-                            setDreamState(p => ({ ...p, results: [...p.results, ...toAppend] }));
-                            lastFlushAt = performance.now();
-                        };
-                        const requestedWorkers = Math.max(1, Math.min(MAX_GENERATION_WORKERS, parseInt(dreamParams.generationWorkers || 1)));
-                        const generationWorkerCount = autoDreamRef.current ? requestedWorkers : 1;
-                        if (!generationEnginesRef.current) generationEnginesRef.current = [];
-		                        while (generationEnginesRef.current.length < generationWorkerCount) {
-		                            generationEnginesRef.current.push(new TextureEngine(64, 64));
-		                        }
-		                        const workerEngines = generationEnginesRef.current.slice(0, generationWorkerCount);
 
-                        await VMUtils.runWorkerPool(dreamParams.batchSize, generationWorkerCount, async (i, slot) => {
-                            const workerEngine = workerEngines[slot];
-                            let attempts = 0;
-                            while (attempts < 10) {
-                                attempts++;
+                try {
+                    while (dreamRunIdRef.current === runId && !dreamStopRequestedRef.current) {
+                        loopCounter++;
+                        const loopStart = performance.now();
+                        const phase = `Dreaming... loop ${loopCounter}`;
+
+                        const targetGenWorkers = getOverdriveWorkerTarget(maxGenerationWorkers, clampOverdrive(dreamParams.overdrive));
+                        const targetBackfillWorkers = getOverdriveWorkerTarget(maxBackfillWorkers, clampOverdrive(dreamParams.overdrive));
+                        if (adaptiveGenWorkers < targetGenWorkers) adaptiveGenWorkers++;
+                        if (adaptiveGenWorkers > targetGenWorkers) adaptiveGenWorkers--;
+                        if (adaptiveBackfillWorkers < targetBackfillWorkers) adaptiveBackfillWorkers++;
+                        if (adaptiveBackfillWorkers > targetBackfillWorkers) adaptiveBackfillWorkers--;
+
+                        while (generationEnginesRef.current.length < adaptiveGenWorkers) generationEnginesRef.current.push(new TextureEngine(64, 64));
+                        // Reuse generation engines for temporal + backfill to avoid WebGL context loss.
+                        adaptiveBackfillWorkers = Math.min(adaptiveBackfillWorkers, adaptiveGenWorkers);
+
+                        const generationBatchSize = Math.max(adaptiveGenWorkers, Math.round(8 + clampOverdrive(dreamParams.overdrive) * 16));
+                        updateDiagnostics(phase);
+
+                        await VMUtils.runWorkerPool(generationBatchSize, adaptiveGenWorkers, async (jobIndex, slot) => {
+                            if (dreamRunIdRef.current !== runId || dreamStopRequestedRef.current) return;
+                            const workerEngine = ensureGenerationEngine(slot);
+                            for (let attempt = 0; attempt < maxAttemptsPerJob; attempt++) {
+                                if (dreamRunIdRef.current !== runId || dreamStopRequestedRef.current) return;
                                 attemptedTotal++;
-                                syncDiagnostics();
-                                const cfg = gRS();
+                                const cfg = buildRandomConfig();
                                 const needsLibraryTexture = hasLibrarySamples && cfg.some(s => s?.typeDef && (s.typeDef.id === 110 || s.typeDef.id === 111));
                                 const librarySource = needsLibraryTexture && libraryRenderCache.length > 0 ? libraryRenderCache[Math.floor(Math.random() * libraryRenderCache.length)] : null;
                                 const renderOptions = librarySource ? { librarySource } : undefined;
+
+                                // Stage 1/2/3 gates: one render, then low-cost checks.
                                 workerEngine.renderStack(cfg, renderOptions);
-                                const an = workerEngine.analyzeTexture(cfg.length - 1);
-                                const temporalMetrics = computeTemporalMetricsForConfig(workerEngine, cfg, 16, `gen-${b}-${i}-${attempts}`, renderOptions);
-                                an.changeScore = temporalMetrics.changeScore;
-                                an.jitterScore = temporalMetrics.jitterScore;
-                                if (passesQualityFilters(an, acceptedHashes)) {
-                                    workerEngine.renderStack(cfg, renderOptions);
-                                    const textureBlob = await workerEngine.getTextureBlob(cfg.length - 1);
-                                    const storageKey = `tex-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-                                    const tempResultUrl = URL.createObjectURL(textureBlob);
-                                    await storeTextureBlob(storageKey, textureBlob);
-                                    storageKeySizesRef.current.set(storageKey, textureBlob.size || 0);
-                                    if (textureBlob.size) setStorageUsedBytes(prev => prev + textureBlob.size);
-                                    scheduleQuotaEstimate();
-                                    const baseItem = {
-                                        config: cfg,
-                                        storageKey,
-                                        id: `b${b}i${i}${Math.random()}`,
-                                        density: an.density,
-                                        sScore: an.sScore,
-                                        circularity: an.circularity,
-                                        squareness: an.squareness,
-                                        changeScore: an.changeScore,
-                                        jitterScore: an.jitterScore,
-                                        hash: an.hash,
-                                        name: generateSemanticName({ config: cfg, density: an.density, sScore: an.sScore }, existingNames)
-                                    };
-                                    const resultItem = { ...baseItem, url: tempResultUrl };
-                                    const libraryItem = { ...baseItem, url: null };
-                                    if (an.hash) acceptedHashes.push(an.hash);
-                                    acceptedTotal++;
-                                    syncDiagnostics(true);
-                                    existingNames.add(baseItem.name); batch.push(libraryItem); pendingResults.push(resultItem);
-                                    if (!flushedOnce) {
-                                        flushPendingResults();
-                                        flushedOnce = true;
-                                    } else if (pendingResults.length >= 5 || performance.now() - lastFlushAt > 200) {
-                                        flushPendingResults();
-                                    }
-                                    break;
+                                const analysis = workerEngine.analyzeTexture(cfg.length - 1);
+
+                                const stageAlpha = runStageAlphaAndSimplicityGate(analysis);
+                                if (!stageAlpha.pass) {
+                                    rejectedTotal++;
+                                    countReject(stageRejects, stageAlpha.reason);
+                                    continue;
                                 }
-                                rejectedTotal++;
-                                syncDiagnostics();
+                                const stageShape = runStageShapeGate(analysis);
+                                if (!stageShape.pass) {
+                                    rejectedTotal++;
+                                    countReject(stageRejects, stageShape.reason);
+                                    continue;
+                                }
+                                const stageSimilarity = runStageSimilarityGate(analysis, acceptedHashes);
+                                if (!stageSimilarity.pass) {
+                                    rejectedTotal++;
+                                    countReject(stageRejects, stageSimilarity.reason);
+                                    continue;
+                                }
+
+                                // Stage 4 gate: expensive temporal check at lower resolution and fewer frames.
+                                const temporalMetrics = computeTemporalMetricsForConfig(workerEngine, cfg, temporalFrameCount, `dream-${loopCounter}-${jobIndex}-${attempt}`, renderOptions);
+                                analysis.changeScore = temporalMetrics.changeScore;
+                                analysis.jitterScore = temporalMetrics.jitterScore;
+                                const stageTemporal = runStageTemporalGate(analysis);
+                                if (!stageTemporal.pass) {
+                                    rejectedTotal++;
+                                    countReject(stageRejects, stageTemporal.reason);
+                                    continue;
+                                }
+
+                                const baseItem = {
+                                    config: cfg,
+                                    id: `d${Date.now()}-${jobIndex}-${Math.random().toString(36).slice(2, 8)}`,
+                                    density: analysis.density,
+                                    sScore: analysis.sScore,
+                                    circularity: analysis.circularity,
+                                    squareness: analysis.squareness,
+                                    changeScore: analysis.changeScore,
+                                    jitterScore: analysis.jitterScore,
+                                    hash: analysis.hash,
+                                    name: generateSemanticName({ config: cfg, density: analysis.density, sScore: analysis.sScore }, existingNames),
+                                    renderOptions
+                                };
+                                existingNames.add(baseItem.name);
+                                if (analysis.hash) acceptedHashes.push(analysis.hash);
+                                acceptedTotal++;
+                                backfillQueue.push(baseItem);
+                                break;
                             }
-                            await new Promise(r => setTimeout(r, 5));
                         });
-                        flushPendingResults();
-                        setSavedLibrary(prev => [...prev, ...batch]);
-                        syncDiagnostics(true);
+
+                        const backfillBatchSize = Math.min(backfillQueue.length, Math.max(adaptiveBackfillWorkers, Math.round(4 + clampOverdrive(dreamParams.overdrive) * 12)));
+                        if (backfillBatchSize > 0) {
+                            const backfillJobs = backfillQueue.splice(0, backfillBatchSize);
+                            await VMUtils.runWorkerPool(backfillJobs.length, adaptiveBackfillWorkers, async (idx, slot) => {
+                                const job = backfillJobs[idx];
+                                if (!job) return;
+                                const engine = ensureGenerationEngine(slot);
+                                const renderOptions = job.renderOptions;
+                                engine.renderStack(job.config, renderOptions);
+                                const textureBlob = await engine.getTextureBlob(job.config.length - 1);
+                                const storageKey = `tex-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                                await storeTextureBlob(storageKey, textureBlob);
+                                storageKeySizesRef.current.set(storageKey, textureBlob.size || 0);
+                                if (textureBlob.size) setStorageUsedBytes(prev => prev + textureBlob.size);
+                                scheduleQuotaEstimate();
+                                const tempResultUrl = URL.createObjectURL(textureBlob);
+                                const persistedItem = { ...job, storageKey, url: null };
+                                const previewItem = { ...job, storageKey, url: tempResultUrl };
+                                delete persistedItem.renderOptions;
+                                delete previewItem.renderOptions;
+                                pendingLibraryItems.push(persistedItem);
+                                pendingResultItems.push(previewItem);
+                            });
+                        }
+
+                        flushPendingItems();
+                        updateDiagnostics(phase);
+
+                        const loopDuration = performance.now() - loopStart;
+                        if (clampOverdrive(dreamParams.overdrive) > 0.8) {
+                            if (loopDuration < 220 && adaptiveGenWorkers < maxGenerationWorkers && backfillQueue.length < commitChunkSize * 2) adaptiveGenWorkers++;
+                            if (loopDuration > 650 && adaptiveGenWorkers > 1) adaptiveGenWorkers--;
+                        }
+                        if (backfillQueue.length > commitChunkSize * 3 && adaptiveBackfillWorkers < maxBackfillWorkers) adaptiveBackfillWorkers++;
+                        if (backfillQueue.length === 0 && loopDuration > 450 && adaptiveBackfillWorkers > 1) adaptiveBackfillWorkers--;
+
+                        if (dreamRunIdRef.current !== runId || dreamStopRequestedRef.current) break;
+                        await new Promise(r => setTimeout(r, 0));
                     }
-                } catch (e) { console.error(e); } finally { setIsDreaming(false); setDreamState(p => ({ ...p, phase: '', pendingAccepted: 0, pendingAttempts: 0, pendingRejected: 0 })); if (autoDreamRef.current) setTimeout(handleDream, 1000); }
+                } catch (e) {
+                    console.error(e);
+                } finally {
+                    flushPendingItems(true);
+                    setIsDreaming(false);
+                    const stopping = dreamStopRequestedRef.current || dreamRunIdRef.current !== runId;
+                    setDreamState(p => ({
+                        ...p,
+                        phase: stopping ? 'Stopped' : '',
+                        pendingAccepted: acceptedTotal,
+                        pendingAttempts: attemptedTotal,
+                        pendingRejected: rejectedTotal,
+                        pendingBackfill: 0,
+                        activeGenWorkers: 0,
+                        activeBackfillWorkers: 0,
+                        stageRejects: { ...stageRejects }
+                    }));
+                    dreamStopRequestedRef.current = false;
+                }
             };
 
             const handleExportSet = async (targetSet) => {
@@ -690,7 +956,11 @@
                 const removedItems = currentLibrary.filter(it => removeIds.has(it.id) || (it.storageKey && removeStorageKeys.has(it.storageKey)));
                 const removedResults = currentResults.filter(it => removeIds.has(it.id) || (it.storageKey && removeStorageKeys.has(it.storageKey)));
                 const nextLibrary = currentLibrary.filter(it => !removeIds.has(it.id) && (!it.storageKey || !removeStorageKeys.has(it.storageKey)));
-                const nextResults = currentResults.filter(it => !removeIds.has(it.id) && (!it.storageKey || !removeStorageKeys.has(it.storageKey)));
+                const nextResults = removeResultsByFillMode(
+                    currentResults,
+                    (it) => removeIds.has(it.id) || (it.storageKey && removeStorageKeys.has(it.storageKey)),
+                    dreamParams.resultFillMode
+                );
 
                 setSavedLibrary(nextLibrary);
                 setDreamState(prev => ({ ...prev, results: nextResults }));
@@ -712,6 +982,37 @@
                     label: targetSet.name || 'Set',
                     items: removedItems
                 });
+            };
+
+            const handleDeleteAllGlobal = async () => {
+                const currentLibrary = savedLibraryRef.current || savedLibrary;
+                const currentResults = dreamResultsRef.current || dreamState.results;
+                if (!currentLibrary.length && !currentResults.length) return;
+
+                currentResults.forEach((it) => {
+                    if (it?.url && typeof it.url === 'string' && it.url.startsWith('blob:')) {
+                        URL.revokeObjectURL(it.url);
+                    }
+                });
+
+                setSavedLibrary([]);
+                setDreamState(prev => ({ ...prev, results: [] }));
+
+                const keysToCleanup = [...new Set(
+                    [...currentLibrary, ...currentResults].map(it => it?.storageKey).filter(Boolean)
+                )];
+                for (const key of keysToCleanup) {
+                    await cleanupStorageIfUnreferenced(key, [], []);
+                }
+
+                if (currentLibrary.length) {
+                    pushDeleteHistory({
+                        id: `all-sets-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                        type: 'set',
+                        label: 'All Sets',
+                        items: currentLibrary
+                    });
+                }
             };
 
             const updateFilterModule = (id, updater) => {
@@ -868,13 +1169,15 @@
                     params: dreamParams,
                     setParams: setDreamParams,
                     onDream: handleDream,
+                    onStop: handleStopDream,
+                    onClearAll: handleDeleteAllGlobal,
                     isDreaming,
                     state: dreamState,
                     onDeleteResult: async (id) => {
-                        const nextResults = dreamState.results.filter(r => r.id !== id);
+                        const nextResults = removeResultsByFillMode(dreamState.results, (r) => r.id === id, dreamParams.resultFillMode);
                         const nextLibrary = savedLibrary;
                         const removed = dreamState.results.find(r => r.id === id);
-                        setDreamState(p => ({ ...p, results: p.results.filter(r => r.id !== id) }));
+                        setDreamState(p => ({ ...p, results: removeResultsByFillMode(p.results, (r) => r.id === id, dreamParams.resultFillMode) }));
                         if (removed?.url && typeof removed.url === 'string' && removed.url.startsWith('blob:')) {
                             URL.revokeObjectURL(removed.url);
                         }
@@ -887,6 +1190,7 @@
                     packConfig,
                     setPackConfig,
                     reorganizePacks,
+                    reorderByDrag,
                     onSave: (it) => setSavedLibrary(p => [...p, { ...it, url: null }]),
                     onLoad: (cfg) => { setSteps(cfg); setActiveTab('builder'); },
                     onDelete: async (id) => {
@@ -896,7 +1200,11 @@
                         if (!removed) return;
                         const targetStorageKey = removed.storageKey;
                         const nextLibrary = currentLibrary.filter(it => it.id !== id && (!targetStorageKey || it.storageKey !== targetStorageKey));
-                        const nextResults = currentResults.filter(it => it.id !== id && (!targetStorageKey || it.storageKey !== targetStorageKey));
+                        const nextResults = removeResultsByFillMode(
+                            currentResults,
+                            (it) => it.id === id || (targetStorageKey && it.storageKey === targetStorageKey),
+                            dreamParams.resultFillMode
+                        );
                         setSavedLibrary(nextLibrary);
                         setDreamState(prev => ({ ...prev, results: nextResults }));
                         currentResults.forEach((it) => {
@@ -918,6 +1226,7 @@
                     renameSet: handleRenameSet,
                     exportSet: handleExportSet,
                     deleteSet: handleDeleteSet,
+                    deleteAllSets: handleDeleteAllGlobal,
                     exportingSetId,
                     exportPhase,
                     exportError

@@ -1,7 +1,25 @@
-        function TextureItemFlip({ item, onClick, onSave, onDelete, engine, isRejected, rejectLabel, flipFrames, autoAnimate = false, flipbookConfig = null }) {
+        function TextureItemFlip({ item, onClick, onSave, onDelete, engine, isRejected, rejectLabel, flipFrames, autoAnimate = false, flipbookConfig = null, dragEnabled = false, onReorder = null }) {
             const [frames, setFrames] = useState([]); const [fi, setFi] = useState(0); const [isH, setIsH] = useState(false); const [isL, setIsL] = useState(false); const [storedUrl, setStoredUrl] = useState(item.url || null); const [flipbookReject, setFlipbookReject] = useState(''); const hT = useRef(null); const aI = useRef(null);
             const fmtScore = (value) => (typeof value === 'number' && !Number.isNaN(value) ? value.toFixed(2) : '--');
             const fmtPct = (value) => (typeof value === 'number' && !Number.isNaN(value) ? `${(value * 100).toFixed(0)}%` : '--');
+            const onDragStart = (e) => {
+                if (!dragEnabled || !item?.id) return;
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('application/x-ntf-id', String(item.id));
+                e.dataTransfer.setData('text/plain', String(item.id));
+            };
+            const onDragOver = (e) => {
+                if (!dragEnabled) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            };
+            const onDrop = (e) => {
+                if (!dragEnabled) return;
+                e.preventDefault();
+                const sourceId = e.dataTransfer.getData('application/x-ntf-id') || e.dataTransfer.getData('text/plain');
+                if (!sourceId || sourceId === String(item?.id)) return;
+                if (typeof onReorder === 'function') onReorder(sourceId, item.id);
+            };
             useEffect(() => {
                 let revokedUrl = null;
                 let cancelled = false;
@@ -64,7 +82,15 @@
             useEffect(() => { if (isH && frames.length > 0) { aI.current = setInterval(() => { setFi(p => (p + 1) % frames.length); }, 1000 / frames.length); } else { if (aI.current) clearInterval(aI.current); setFi(0); } return () => { if (aI.current) clearInterval(aI.current); }; }, [isH, frames]);
             const dU = (isH && frames.length > 0) ? frames[fi] : (storedUrl || item.url);
             return (
-                <div className={`relative aspect-square bg-[#000] checkerboard border border-gray-800 rounded overflow-hidden group dream-item-enter ${isRejected ? 'opacity-50' : 'hover:border-purple-500'}`} onMouseEnter={hME} onMouseLeave={hML}>
+                <div
+                    className={`relative aspect-square bg-[#000] checkerboard border border-gray-800 rounded overflow-hidden group dream-item-enter ${isRejected ? 'opacity-50' : 'hover:border-purple-500'} ${dragEnabled ? 'cursor-move' : ''}`}
+                    onMouseEnter={hME}
+                    onMouseLeave={hML}
+                    draggable={dragEnabled}
+                    onDragStart={onDragStart}
+                    onDragOver={onDragOver}
+                    onDrop={onDrop}
+                >
                     <img src={dU} className={`w-full h-full object-contain transition-opacity ${isRejected ? 'opacity-20 blur-sm' : ''}`} />
                     {isL && (<div className="absolute top-2 right-2"><div className="w-3 h-3 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div></div>)}
                     {!isL && flipbookReject && <div className="absolute top-2 right-2 bg-black/80 border border-orange-500 text-orange-300 text-[8px] px-1.5 py-0.5 rounded uppercase">{flipbookReject}</div>}
@@ -123,6 +149,16 @@
                             <div className="absolute inset-0 bg-black/10"></div>
                         </div>
                     )}
+                </div>
+            );
+        }
+
+        function OpenSlotTile() {
+            return (
+                <div className="relative aspect-square bg-[#000] checkerboard border border-dashed border-gray-700 rounded overflow-hidden">
+                    <div className="absolute inset-0 flex items-center justify-center text-[10px] font-mono text-gray-500 uppercase tracking-wide">
+                        Open Slot
+                    </div>
                 </div>
             );
         }
@@ -229,6 +265,8 @@
             const [showC, setShowC] = useState(true);
             const results = dVM.state.results || [];
             const liveStart = Math.max(0, results.length - 24);
+            const cfg = libVM?.packConfig || {};
+            const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
             const complexityRangeRef = useRef(null);
             const complexityDragHandleRef = useRef(null);
             const complexityMinBound = 1;
@@ -238,6 +276,8 @@
             const maxComplexity = Math.max(complexityMinBound, Math.min(complexityMaxBound, dVM.params.maxComplexity));
             const minComplexityPercent = ((minComplexity - complexityMinBound) / complexitySpan) * 100;
             const maxComplexityPercent = ((maxComplexity - complexityMinBound) / complexitySpan) * 100;
+            const overdrive = Math.max(0, Math.min(1, Number(dVM.params.overdrive ?? 0)));
+            const overdrivePercent = Math.round(overdrive * 100);
             const onMinComplexityChange = (value) => {
                 const rawMin = Math.max(complexityMinBound, Math.min(parseInt(value), complexityMaxBound));
                 dVM.setParams((p) => {
@@ -288,17 +328,19 @@
             return (
                 <div className="flex flex-col h-full bg-[#0a0a0a] relative">
                     <div className="p-4 border-b border-gray-800 bg-[#151515] z-30 shadow-2xl">
-                        <div className="flex justify-between items-center mb-4"><h2 className="text-2xl font-bold text-white tracking-wider font-mono uppercase"><span className="text-purple-500">✦</span> Dream Engine</h2><button onClick={() => setShowC(!showC)} className="px-3 py-1 border border-gray-700 rounded text-[10px] font-bold text-gray-400">CONFIG {showC ? '▲' : '▼'}</button></div>
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-2xl font-bold text-white tracking-wider font-mono uppercase"><span className="text-purple-500">✦</span> Dream Engine</h2>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => dVM.onClearAll?.()} disabled={results.length === 0} className={`px-3 py-1 rounded text-[10px] font-bold border ${results.length === 0 ? 'border-gray-800 text-gray-600 cursor-not-allowed bg-[#171717]' : 'border-red-800 text-red-300 hover:text-white hover:bg-red-700/60 bg-[#1f1515]'}`}>CLEAR ALL</button>
+                                <button onClick={() => setShowC(!showC)} className="px-3 py-1 border border-gray-700 rounded text-[10px] font-bold text-gray-400">CONFIG {showC ? '▲' : '▼'}</button>
+                            </div>
+                        </div>
 	                        {showC && (
 	                            <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 mb-4 overflow-x-auto config-scroll">
-                                    <div className="grid grid-cols-3 gap-8">
+                                    <div className="grid grid-cols-2 gap-8">
                                         <div className="flex flex-col gap-1">
-                                            <div className="flex justify-between text-gray-400"><span>Batch Size</span><span>{dVM.params.batchSize}</span></div>
-                                            <input type="range" min="1" max="100" step="1" value={dVM.params.batchSize} onChange={(e) => dVM.setParams(p => ({ ...p, batchSize: parseInt(e.target.value) }))} className="slider-thumb w-full" />
-                                        </div>
-                                        <div className="flex flex-col gap-1">
-                                            <div className="flex justify-between text-gray-400"><span>Cycles</span><span>{dVM.params.batchCycles}</span></div>
-                                            <input type="range" min="1" max="50" step="1" value={dVM.params.batchCycles} onChange={(e) => dVM.setParams(p => ({ ...p, batchCycles: parseInt(e.target.value) }))} className="slider-thumb w-full" />
+                                            <div className="flex justify-between text-gray-400"><span>Overdrive</span><span>{overdrivePercent}%</span></div>
+                                            <input type="range" min="0" max="1" step="0.01" value={overdrive} onChange={(e) => dVM.setParams(p => ({ ...p, overdrive: parseFloat(e.target.value) }))} className="slider-thumb w-full" />
                                         </div>
 	                                    <div className="flex flex-col gap-1">
 	                                        <div className="flex justify-between text-gray-400"><span>Complexity</span><span>{minComplexity}-{maxComplexity}</span></div>
@@ -315,21 +357,20 @@
                         <input type="text" value={dVM.params.prompt || ""} onChange={(e) => dVM.setParams(p => ({ ...p, prompt: e.target.value }))} placeholder="Filter description..." className="w-full bg-[#0a0a0a] border border-gray-700 rounded px-4 py-2 text-sm text-white focus:border-purple-500 outline-none" />
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 pb-48 relative">
-                        {dVM.isDreaming && <div className="fixed top-24 left-1/2 -translate-x-1/2 bg-black/90 px-6 py-2 rounded-full border border-purple-500 text-purple-400 text-xs font-mono animate-pulse z-40 shadow-2xl">{dVM.state.phase} | attempts: {dVM.state.pendingAttempts || 0} | accepted: {dVM.state.pendingAccepted || 0} | rejected: {dVM.state.pendingRejected || 0}</div>}
-                        <div className="grid grid-cols-6 gap-4">{results.map((it, idx) => idx >= liveStart ? <TextureItemFlip key={it.id} item={it} engine={previewEngine} flipFrames={dVM.params.flipFrames} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} onDelete={() => dVM.onDeleteResult(it.id)} onSave={libVM.onSave} onClick={libVM.onLoad} /> : <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} flipFrames={dVM.params.flipFrames} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} onDelete={() => dVM.onDeleteResult(it.id)} onSave={libVM.onSave} onClick={libVM.onLoad} />)}</div>
+                        {dVM.isDreaming && <div className="fixed top-24 left-1/2 -translate-x-1/2 bg-black/90 px-6 py-2 rounded-full border border-purple-500 text-purple-400 text-xs font-mono animate-pulse z-40 shadow-2xl">{dVM.state.phase} | attempts: {dVM.state.pendingAttempts || 0} | accepted: {dVM.state.pendingAccepted || 0} | rejected: {dVM.state.pendingRejected || 0} | gen:{dVM.state.activeGenWorkers || 0} | backfill:{dVM.state.activeBackfillWorkers || 0} | queue:{dVM.state.pendingBackfill || 0}</div>}
+                        <div className="grid grid-cols-6 gap-4">{results.map((it, idx) => {
+                            if (it?.__slotOpen) return <OpenSlotTile key={it.id} />;
+                            const itemProps = { item: it, engine: previewEngine, flipFrames: dVM.params.flipFrames, flipbookConfig: flipbookVM?.config, autoAnimate: uiVM?.autoAnimateFrames, onDelete: () => dVM.onDeleteResult(it.id), onSave: libVM.onSave, onClick: libVM.onLoad, dragEnabled: reorderEnabled, onReorder: libVM.reorderByDrag };
+                            return idx >= liveStart ? <TextureItemFlip key={it.id} {...itemProps} /> : <VirtualizedTextureItem key={it.id} {...itemProps} />;
+                        })}</div>
                     </div>
-                    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-4">
-                        <div className="bg-black/80 backdrop-blur-md px-6 py-2 rounded-full border border-gray-800 flex items-center gap-4 shadow-xl pointer-events-auto">
-                            <label className="flex items-center cursor-pointer select-none">
-                                <div className="relative">
-                                    <input type="checkbox" checked={dVM.params.autoDream} onChange={(e) => dVM.setParams(p => ({ ...p, autoDream: e.target.checked }))} className="sr-only" />
-                                    <div className={`w-10 h-5 rounded-full transition-colors ${dVM.params.autoDream ? 'bg-blue-600' : 'bg-gray-700'}`}></div>
-                                    <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${dVM.params.autoDream ? 'translate-x-5' : ''}`}></div>
-                                </div>
-                                <span className="ml-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Auto Dream</span>
-                            </label>
-                        </div>
-                        <button onClick={dVM.onDream} disabled={dVM.isDreaming} className={`h-16 px-12 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold tracking-[0.2em] shadow-2xl border border-blue-400/30 transition-all pointer-events-auto ${dVM.isDreaming ? 'opacity-50 cursor-wait' : ''}`}>{dVM.isDreaming ? 'DREAMING...' : 'START DREAM'}</button>
+                    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex items-center">
+                        <button
+                            onClick={dVM.isDreaming ? dVM.onStop : dVM.onDream}
+                            className={`h-16 px-12 text-white rounded-full font-bold tracking-[0.2em] shadow-2xl transition-all pointer-events-auto ${dVM.isDreaming ? 'bg-[#2a1515] hover:bg-red-700/70 border border-red-700/60' : 'bg-blue-600 hover:bg-blue-500 border border-blue-400/30'}`}
+                        >
+                            {dVM.isDreaming ? 'STOP' : 'DREAM'}
+                        </button>
                     </div>
                 </div>
             );
@@ -524,6 +565,7 @@
         function SetsTab({ libVM, previewEngine, uiVM, flipbookVM }) {
             const cfg = libVM.packConfig || {};
             const setCfg = (patch) => libVM.setPackConfig(prev => ({ ...prev, ...patch }));
+            const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
             return (
                 <div className="flex flex-col h-full bg-[#111] p-6">
                     <div className="mb-6">
@@ -532,7 +574,10 @@
                     <div className="flex-1 overflow-y-auto">
                         <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 mb-6">
                         <div className="text-[11px] font-bold text-gray-300 mb-3 uppercase tracking-wide">Pack Sorting Config</div>
-                        <div className="flex justify-end mb-3">
+                        <div className="flex justify-end mb-3 gap-2">
+                            <button onClick={() => libVM.deleteAllSets?.()} disabled={libVM.exportingSetId !== null || (libVM.items || []).length === 0} className={`text-[10px] px-3 py-1.5 rounded font-bold border ${libVM.exportingSetId !== null || (libVM.items || []).length === 0 ? 'bg-[#171717] border-gray-800 text-gray-600 cursor-not-allowed' : 'bg-[#2a1515] border-red-900 text-red-300 hover:bg-red-700/50 hover:text-white'}`}>
+                                DELETE ALL SETS
+                            </button>
                             <button onClick={() => libVM.reorganizePacks?.()} className="text-[10px] px-3 py-1.5 rounded font-bold bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-200 border border-gray-700">
                                 REORGANIZE PACKS
                             </button>
@@ -603,7 +648,7 @@
                                     <div className="text-[10px] text-red-400 mb-3 font-mono">{libVM.exportError}</div>
                                 )}
                                 <div className="grid grid-cols-10 gap-2">
-                                    {set.items.map((it) => <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} />)}
+                                    {set.items.map((it) => <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} dragEnabled={reorderEnabled} onReorder={libVM.reorderByDrag} />)}
                                 </div>
                             </div>
                         ))}</div>
@@ -937,6 +982,16 @@ void main() {
                                 <span>{dVM?.params?.packagingWorkers ?? 5}</span>
                             </div>
                             <input type="range" min="1" max="5" step="1" value={dVM?.params?.packagingWorkers ?? 5} onChange={(e) => dVM?.setParams(p => ({ ...p, packagingWorkers: parseInt(e.target.value) }))} className="w-full slider-thumb" />
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="text-sm font-bold text-white">Factory Fill Mode</div>
+                                <div className="text-xs text-gray-400 mt-1">Slide appends new cards; Slot Fill moves the current bottom-most card into the deleted slot immediately.</div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => dVM?.setParams(p => ({ ...p, resultFillMode: 'slide' }))} className={`text-[10px] px-3 py-1.5 rounded font-bold border ${dVM?.params?.resultFillMode === 'slide' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#2a2a2a] border-gray-700 text-gray-300'}`}>SLIDE</button>
+                                <button onClick={() => dVM?.setParams(p => ({ ...p, resultFillMode: 'slot' }))} className={`text-[10px] px-3 py-1.5 rounded font-bold border ${dVM?.params?.resultFillMode === 'slot' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#2a2a2a] border-gray-700 text-gray-300'}`}>SLOT FILL</button>
+                            </div>
                         </div>
                     </div>
                 </div>
