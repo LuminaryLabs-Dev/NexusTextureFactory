@@ -36,6 +36,7 @@
             OUTLINE_ALPHA: { id: 107, name: "Outline", cat: "FILT", customOpType: "shader", customCode: "float customOp(vec2 uv){ vec2 t = 1.0 / max(vec2(1.0), u_resolution); float center = samplePrev(uv); float radius = clamp(p1, 0.0, 8.0); float maxN = 0.0; float minN = 1.0; for (int y = -8; y <= 8; y++) for (int x = -8; x <= 8; x++) { float dx = float(x); float dy = float(y); if (sqrt(dx*dx + dy*dy) > radius) continue; float a = samplePrev(uv + vec2(dx, dy) * t); maxN = max(maxN, a); minN = min(minN, a); } float outer = max(0.0, maxN - center); float inner = max(0.0, center - minN); float mode = floor(p3 + 0.5); float outA = outer; if (mode > 0.5 && mode < 1.5) outA = inner; if (mode >= 1.5) outA = max(outer, inner); return smoothstep(0.0, max(0.001, p2), outA); }", params: { p1: 2.0, p2: 0.1, p3: 2, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Thickness (px)", type: 'slider', min: 0, max: 8, step: 1 }, { key: 'p2', label: "Softness", type: 'slider', min: 0.01, max: 1, step: 0.01 }, { key: 'p3', label: "Mode", type: 'select', options: [{ label: "Outer", value: 0 }, { label: "Inner", value: 1 }, { label: "Both", value: 2 }] }] },
             POSTERIZE_ALPHA: { id: 108, name: "Posterize Alpha", cat: "FILT", customOpType: "shader", customCode: "float customOp(vec2 uv){ float a = samplePrev(uv); float steps = max(2.0, floor(p1 + 0.5)); a = clamp(a + p2, 0.0, 1.0); return floor(a * (steps - 1.0) + 0.5) / (steps - 1.0); }", params: { p1: 4, p2: 0, p3: 0, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Steps", type: 'slider', min: 2, max: 16, step: 1 }, { key: 'p2', label: "Bias", type: 'slider', min: -1, max: 1, step: 0.01 }] },
             DISTANCE_BANDS: { id: 109, name: "Distance Bands", cat: "FILT", customOpType: "shader", customCode: "float customOp(vec2 uv){ float a = samplePrev(uv); vec2 t = 1.0 / max(vec2(1.0), u_resolution); float sum = 0.0; float count = 0.0; for (int y = -2; y <= 2; y++) for (int x = -2; x <= 2; x++) { sum += samplePrev(uv + vec2(float(x), float(y)) * t); count += 1.0; } float avg = sum / max(1.0, count); float edge = abs(a - avg); float phase = fract(edge * max(1.0, p1) + p4); float band = smoothstep(p2, p2 + max(0.001, p3), phase) - smoothstep(p2 + p3, p2 + p3 + max(0.001, p3), phase); return clamp(band, 0.0, 1.0); }", params: { p1: 8, p2: 0.3, p3: 0.1, p4: 0.0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Frequency", type: 'slider', min: 1, max: 64, step: 1 }, { key: 'p2', label: "Band Start", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p3', label: "Band Width", type: 'slider', min: 0.01, max: 0.5, step: 0.01 }, { key: 'p4', label: "Phase", type: 'slider', min: 0, max: 1, step: 0.01 }] },
+            GRUNGE_SCRATCH: { id: 112, name: "Grunge Scratch", cat: "FILT", customOpType: "shader", customCode: "float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); } vec2 hash22(vec2 p){ return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453123); } float sdSeg(vec2 p, vec2 a, vec2 b){ vec2 pa = p - a; vec2 ba = b - a; float h = clamp(dot(pa, ba) / max(1e-6, dot(ba, ba)), 0.0, 1.0); return length(pa - ba * h); } float scratchLayer(vec2 uv, float scale, float density, float lenBias, float seed){ vec2 gv = uv * scale; vec2 id = floor(gv); vec2 f = fract(gv) - 0.5; float outA = 0.0; for (int y = -1; y <= 1; y++) { for (int x = -1; x <= 1; x++) { vec2 cid = id + vec2(float(x), float(y)); float appear = step(mix(0.98, 0.60, density), hash21(cid + seed)); if (appear < 0.5) continue; vec2 r = hash22(cid + seed * 1.7); float ang = r.x * 6.2831853; vec2 dir = vec2(cos(ang), sin(ang)); float segLen = mix(0.12, 1.35, lenBias) * mix(0.55, 1.30, r.y); vec2 center = hash22(cid + seed * 2.3) - 0.5; vec2 a = center - dir * segLen * 0.5; vec2 b = center + dir * segLen * 0.5; vec2 p = f - vec2(float(x), float(y)); float d = sdSeg(p, a, b); float w = mix(0.010, 0.050, density) * mix(0.75, 1.35, hash21(cid + seed * 3.1)); float line = 1.0 - smoothstep(w, w * 2.2, d); outA = max(outA, line); } } return outA; } float speckLayer(vec2 uv, float scale, float amount, float fluidity, float seed){ vec2 gv = uv * scale; vec2 id = floor(gv); vec2 f = fract(gv) - 0.5; float outA = 0.0; float fl = clamp(fluidity, 0.0, 1.0); for (int y = -1; y <= 1; y++) { for (int x = -1; x <= 1; x++) { vec2 cid = id + vec2(float(x), float(y)); float on = step(mix(0.995, 0.70, amount), hash21(cid + seed)); if (on < 0.5) continue; vec2 c = hash22(cid + seed * 1.9) - 0.5; float r0 = mix(0.03, 0.22, hash21(cid + seed * 2.7)) * mix(0.5, 1.4, amount); vec2 p = (f - vec2(float(x), float(y))) - c; float d = length(p); float r = r0 * mix(1.0, 2.35, fl); float spot = 1.0 - smoothstep(r, r * 1.7, d); float splat = spot; if (fl > 0.001) { float baseAng = hash21(cid + seed * 4.1) * 6.2831853; float w = max(0.002, r0 * mix(0.55, 0.10, fl)); for (int k = 0; k < 3; k++) { float fk = float(k); float angJ = (hash21(cid + seed * (5.0 + fk)) - 0.5) * 1.2; float ang = baseAng + fk * 2.1 + angJ; vec2 dir = vec2(cos(ang), sin(ang)); float len = r0 * mix(1.8, 10.0, fl) * mix(0.4, 1.0, hash21(cid + seed * (6.3 + fk))); float lineD = sdSeg(p, vec2(0.0), dir * len); float streak = 1.0 - smoothstep(w, w * 2.0, lineD); float endD = length(p - dir * len); float droplet = 1.0 - smoothstep(w * 1.2, w * 2.8, endD); splat = max(splat, max(streak, droplet) * mix(0.15, 0.95, fl)); } } outA = max(outA, splat); } } return outA; } float customOp(vec2 uv){ float density = clamp(p1, 0.0, 1.0); float scratchLength = clamp(p2, 0.0, 1.0); float speckAmount = clamp(p3, 0.0, 1.0); float fluidity = clamp(p4, 0.0, 1.0); float scratchesA = scratchLayer(uv, mix(8.0, 18.0, density), density, scratchLength, 11.0); float scratchesB = scratchLayer(uv, mix(20.0, 42.0, density), density * 0.85, scratchLength * 0.75, 23.0) * 0.75; float specks = speckLayer(uv, mix(16.0, 96.0, speckAmount), speckAmount, fluidity, 31.0); float damage = clamp(max(max(scratchesA, scratchesB), specks), 0.0, 1.0); float base = (u_hasPrevF < 0.5) ? 1.0 : samplePrev(uv); return clamp(base - damage, 0.0, 1.0); }", params: { p1: 0.45, p2: 0.65, p3: 0.4, p4: 0.0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Density", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p2', label: "Scratch Length", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p3', label: "Speck Amount", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p4', label: "Fluidity", type: 'slider', min: 0, max: 1, step: 0.01 }] },
             LIBRARY_STAMP_SCATTER: { id: 110, name: "Library Stamp/Scatter", cat: "MOD", customOpType: "shader", customCode: "float hash1(float n){ return fract(sin(n) * 43758.5453123); } float customOp(vec2 uv){ float count = clamp(floor(p1 + 0.5), 1.0, 16.0); float jitter = p2; float sMin = max(0.05, p3); float sMax = max(sMin, p4); float seed = p5 * 13.17; float outA = 0.0; for (int i = 0; i < 16; i++) { if (float(i) >= count) break; float fi = float(i) + seed; vec2 c = vec2(hash1(fi * 1.7), hash1(fi * 2.3)); c = mix(vec2(0.5), c, jitter); float s = mix(sMin, sMax, hash1(fi * 3.1)); vec2 suv = (uv - c) / s + 0.5; outA = max(outA, sampleLibrary(suv)); } return outA; }", params: { p1: 8, p2: 1.0, p3: 0.2, p4: 0.8, p5: 123, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Count", type: 'slider', min: 1, max: 16, step: 1 }, { key: 'p2', label: "Jitter", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p3', label: "Scale Min", type: 'slider', min: 0.05, max: 2, step: 0.01 }, { key: 'p4', label: "Scale Max", type: 'slider', min: 0.05, max: 2, step: 0.01 }, { key: 'p5', label: "Seed", type: 'slider', min: 0, max: 9999, step: 1 }] },
             LIBRARY_DISPLACE: { id: 111, name: "Library Displace", cat: "MOD", customOpType: "shader", customCode: "float customOp(vec2 uv){ vec2 p = uv * max(0.001, p2) + vec2(p3 * 0.01, p3 * 0.03); float ax = sampleLibrary(p + vec2(0.13, 0.37)); float ay = sampleLibrary(p + vec2(0.71, 0.19)); vec2 d = (vec2(ax, ay) - 0.5) * 2.0 * p1 * 0.2; return samplePrev(uv + d); }", params: { p1: 0.35, p2: 3.0, p3: 123, p4: 0, p5: 0, p6: 0, p7: 0 }, controls: [{ key: 'p1', label: "Strength", type: 'slider', min: 0, max: 1, step: 0.01 }, { key: 'p2', label: "Scale", type: 'slider', min: 0, max: 10, step: 0.1 }, { key: 'p3', label: "Seed", type: 'slider', min: 0, max: 9999, step: 1 }] }
         };
@@ -43,7 +44,7 @@
         const STEP_MENU_GROUPS = [
             { label: "GENERATORS", keys: ['BASE_SHAPE', 'BASE_GRAD'] },
             { label: "NOISE / ERODE", keys: ['NOISE_PERLIN', 'NOISE_WORLEY'] },
-            { label: "FILTERS", keys: ['THRESHOLD', 'MORPH_DILATE_ERODE', 'MORPH_OPEN_CLOSE', 'EDGE_SOBEL', 'OUTLINE_ALPHA', 'POSTERIZE_ALPHA', 'DISTANCE_BANDS'] },
+            { label: "FILTERS", keys: ['THRESHOLD', 'MORPH_DILATE_ERODE', 'MORPH_OPEN_CLOSE', 'EDGE_SOBEL', 'OUTLINE_ALPHA', 'POSTERIZE_ALPHA', 'DISTANCE_BANDS', 'GRUNGE_SCRATCH'] },
             { label: "MODIFIERS", keys: ['FRACTAL', 'SPIRAL', 'VIGNETTE', 'SMEAR', 'DOMAIN_WARP', 'RADIAL_WARP', 'KALEIDOSCOPE_PLUS', 'LIBRARY_STAMP_SCATTER', 'LIBRARY_DISPLACE'] },
             { label: "UTILITY", keys: ['BASIC'] }
         ];
@@ -68,6 +69,7 @@
             OUTLINE_ALPHA: "Creates inner/outer outlines from alpha boundaries.",
             POSTERIZE_ALPHA: "Quantizes alpha into discrete stepped levels.",
             DISTANCE_BANDS: "Builds contour-like alpha bands from local distance cues.",
+            GRUNGE_SCRATCH: "Carves scratches and dust specks into the current alpha using procedural grunge patterns.",
             LIBRARY_STAMP_SCATTER: "Scatters repeated alpha stamps with randomized placement/scale.",
             LIBRARY_DISPLACE: "Displaces alpha sampling based on alpha-derived vectors."
         };
@@ -89,7 +91,7 @@ return Math.max(0, Math.min(1, 1 - d * 2.2));`;
         const MAX_GENERATION_WORKERS = 5;
         const MAX_PACKAGING_WORKERS = 5;
         const MAX_DELETE_HISTORY = 10;
-        const FILTER_MODULE_KEYS = ['NOISE_PERLIN', 'NOISE_WORLEY', 'THRESHOLD', 'FRACTAL', 'SPIRAL', 'SMEAR', 'VIGNETTE', 'DOMAIN_WARP', 'RADIAL_WARP', 'KALEIDOSCOPE_PLUS', 'MORPH_DILATE_ERODE', 'MORPH_OPEN_CLOSE', 'EDGE_SOBEL', 'OUTLINE_ALPHA', 'POSTERIZE_ALPHA', 'DISTANCE_BANDS', 'LIBRARY_STAMP_SCATTER', 'LIBRARY_DISPLACE'];
+        const FILTER_MODULE_KEYS = ['NOISE_PERLIN', 'NOISE_WORLEY', 'THRESHOLD', 'FRACTAL', 'SPIRAL', 'SMEAR', 'VIGNETTE', 'DOMAIN_WARP', 'RADIAL_WARP', 'KALEIDOSCOPE_PLUS', 'MORPH_DILATE_ERODE', 'MORPH_OPEN_CLOSE', 'EDGE_SOBEL', 'OUTLINE_ALPHA', 'POSTERIZE_ALPHA', 'DISTANCE_BANDS', 'GRUNGE_SCRATCH', 'LIBRARY_STAMP_SCATTER', 'LIBRARY_DISPLACE'];
         const TEXTURE_DB_NAME = 'alphacarve-texture-cache';
         const TEXTURE_DB_STORE = 'textures';
         const META_KEY_LIBRARY = 'alphacarve-meta-library-v1';
@@ -99,6 +101,7 @@ return Math.max(0, Math.min(1, 1 - d * 2.2));`;
         const META_KEY_DREAM_PARAMS = 'alphacarve-meta-dream-params-v1';
         const META_KEY_UI_PREFS = 'alphacarve-meta-ui-prefs-v1';
         const META_KEY_PACK_CONFIG = 'alphacarve-meta-pack-config-v1';
+        const META_KEY_FLIPBOOK_CONFIG = 'alphacarve-meta-flipbook-config-v1';
 
         const getDefaultBlendForCategory = (cat) => {
             if (cat === 'GEN') return 0;
@@ -118,6 +121,88 @@ return Math.max(0, Math.min(1, 1 - d * 2.2));`;
                 universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 }
             };
         });
+
+        const STEP_TYPE_KEY_BY_ID = Object.entries(STEP_TYPES).reduce((acc, [key, value]) => {
+            acc[value.id] = key;
+            return acc;
+        }, {});
+
+        const createDefaultFlipbookConfig = () => {
+            const operations = {};
+            Object.entries(STEP_TYPES).forEach(([key, td]) => {
+                const params = {};
+                td.controls.forEach((c) => {
+                    if (c.type !== 'slider') return;
+                    const isAngle = /angle/i.test(c.label || '');
+                    const span = Number(c.max) - Number(c.min);
+                    params[c.key] = {
+                        enabled: false,
+                        range: isAngle ? 24 : Math.max(0.01, span * 0.08),
+                        speed: 1.0,
+                        phase: 0.0,
+                        wave: 'wrap'
+                    };
+                });
+                operations[key] = {
+                    enabled: false,
+                    expanded: false,
+                    speed: 1.0,
+                    wave: 'wrap',
+                    universal: {
+                        mult: { enabled: false, range: 0.05, speed: 1.0, phase: 0.11, wave: 'wrap' },
+                        scale: { enabled: false, range: 0.02, speed: 1.0, phase: 0.29, wave: 'wrap' }
+                    },
+                    params
+                };
+            });
+
+            const turnOn = (opKey, paramKey, range, speed = 1.0, wave = 'wrap', phase = 0.0) => {
+                const op = operations[opKey];
+                if (!op) return;
+                op.enabled = true;
+                if (paramKey === 'mult' || paramKey === 'scale') {
+                    op.universal[paramKey] = { enabled: true, range, speed, phase, wave };
+                    return;
+                }
+                if (!op.params[paramKey]) return;
+                op.params[paramKey] = { enabled: true, range, speed, phase, wave };
+            };
+
+            turnOn('NOISE_PERLIN', 'p6', 0.35);
+            turnOn('NOISE_PERLIN', 'p7', 0.35, 1.0, 'wrap', 0.17);
+            turnOn('NOISE_WORLEY', 'p6', 0.28);
+            turnOn('NOISE_WORLEY', 'p7', 0.28, 1.0, 'wrap', 0.17);
+            turnOn('SPIRAL', 'p1', 0.16, 1.0, 'pingpong');
+            turnOn('SMEAR', 'p2', 0.06, 0.8, 'pingpong');
+            turnOn('DOMAIN_WARP', 'p3', 0.08, 0.9, 'pingpong');
+            turnOn('RADIAL_WARP', 'p2', 0.2, 0.8, 'pingpong');
+            turnOn('LIBRARY_DISPLACE', 'p1', 0.08, 0.8, 'pingpong');
+            turnOn('NOISE_PERLIN', 'mult', 0.02, 1.0, 'wrap', 0.11);
+            turnOn('NOISE_PERLIN', 'scale', 0.01, 1.0, 'wrap', 0.29);
+            turnOn('NOISE_WORLEY', 'mult', 0.02, 1.0, 'wrap', 0.11);
+            turnOn('NOISE_WORLEY', 'scale', 0.01, 1.0, 'wrap', 0.29);
+
+            return {
+                global: {
+                    enabled: true,
+                    frameCount: 16,
+                    strength: 1.0,
+                    baseSpeed: 1.0,
+                    seedMode: 'stable'
+                },
+                quality: {
+                    enabled: true,
+                    minFrameDensity: 0.03,
+                    maxEmptyFrameRatio: 0.25,
+                    minTemporalChange: 0.12,
+                    maxTemporalChange: 0.95,
+                    maxJitter: 0.2,
+                    minFrameDelta: 0.008,
+                    maxFrameDelta: 0.2
+                },
+                operations
+            };
+        };
 
         let textureDbPromise = null;
         const getTextureDb = () => {
@@ -205,42 +290,139 @@ return Math.max(0, Math.min(1, 1 - d * 2.2));`;
             return t < 0.5 ? t * 2 : (1 - t) * 2;
         };
 
-        const buildAnimatedConfigFrame = (baseConfig, frameIndex, totalFrames, seed = 'default') => {
+        const resolveStepKey = (step) => {
+            if (!step?.typeDef) return null;
+            if (step.typeKey) return step.typeKey;
+            return STEP_TYPE_KEY_BY_ID[step.typeDef.id] || null;
+        };
+
+        const findControlForParam = (stepKey, paramKey) => {
+            const td = stepKey ? STEP_TYPES[stepKey] : null;
+            if (!td || !Array.isArray(td.controls)) return null;
+            return td.controls.find((c) => c.key === paramKey) || null;
+        };
+
+        const clampToControl = (value, control) => {
+            if (!control || control.type !== 'slider') return value;
+            return Math.max(Number(control.min), Math.min(Number(control.max), value));
+        };
+
+        const buildAnimatedConfigFrame = (baseConfig, frameIndex, totalFrames, seed = 'default', flipbookConfig) => {
             if (!Array.isArray(baseConfig)) return [];
-            if (frameIndex <= 0 || totalFrames <= 1) {
+            const fbGlobal = flipbookConfig?.global || {};
+            if (frameIndex <= 0 || totalFrames <= 1 || fbGlobal.enabled === false) {
                 return JSON.parse(JSON.stringify(baseConfig));
             }
             const t = frameIndex / Math.max(1, totalFrames - 1);
+            const baseStrength = Number(fbGlobal.strength ?? 1.0);
+            const baseSpeed = Number(fbGlobal.baseSpeed ?? 1.0);
             return baseConfig.map((s, idx) => {
                 if (idx === 0 || idx === baseConfig.length - 1) return s;
                 const nextParams = { ...s.params };
                 const nextUniversal = { ...s.universal };
+                const stepKey = resolveStepKey(s);
+                const opCfg = (stepKey && flipbookConfig?.operations?.[stepKey]) ? flipbookConfig.operations[stepKey] : null;
+                if (!opCfg || !opCfg.enabled) return { ...s, params: nextParams, universal: nextUniversal };
 
-                if (s.typeDef.cat === 'ERODE') {
-                    const modeX = pickAnimationMode(seed, idx, 'p6');
-                    const modeY = pickAnimationMode(seed, idx, 'p7');
-                    const wx = animationWave(modeX, t);
-                    const wy = animationWave(modeY, t + 0.17);
-                    nextParams.p6 = (s.params.p6 || 0) + wx * 0.5;
-                    nextParams.p7 = (s.params.p7 || 0) + wy * 0.5;
-                } else if (s.typeDef.id === 13) {
-                    const mode = pickAnimationMode(seed, idx, 'spiral');
-                    const w = animationWave(mode, t);
-                    nextParams.p1 = Math.max(0, Math.min(2, s.params.p1 + w * 0.2));
-                } else if (s.typeDef.id === 12) {
-                    const mode = pickAnimationMode(seed, idx, 'fractal');
-                    const w = animationWave(mode, t);
-                    nextParams.p1 = Math.max(1, Math.min(16, s.params.p1 + Math.round(w * 1.5)));
-                }
+                Object.keys(nextParams).forEach((paramKey) => {
+                    const pCfg = opCfg.params?.[paramKey];
+                    if (!pCfg || !pCfg.enabled) return;
+                    const waveMode = pCfg.wave || opCfg.wave || pickAnimationMode(seed, idx, paramKey);
+                    const speed = baseSpeed * Number(opCfg.speed ?? 1.0) * Number(pCfg.speed ?? 1.0);
+                    const phase = Number(pCfg.phase ?? 0.0);
+                    const wave = animationWave(waveMode, t * speed + phase);
+                    const delta = wave * Number(pCfg.range ?? 0) * baseStrength;
+                    const ctrl = findControlForParam(stepKey, paramKey);
+                    const nextValue = (Number(s.params[paramKey]) || 0) + delta;
+                    nextParams[paramKey] = clampToControl(nextValue, ctrl);
+                });
 
-                const multMode = pickAnimationMode(seed, idx, 'mult');
-                const scaleMode = pickAnimationMode(seed, idx, 'scale');
-                const wm = animationWave(multMode, t + 0.11);
-                const ws = animationWave(scaleMode, t + 0.29);
-                nextUniversal.mult = s.universal.mult + wm * 0.05;
-                nextUniversal.scale = s.universal.scale + ws * 0.02;
+                ['mult', 'scale'].forEach((key) => {
+                    const uCfg = opCfg.universal?.[key];
+                    if (!uCfg || !uCfg.enabled) return;
+                    const waveMode = uCfg.wave || opCfg.wave || pickAnimationMode(seed, idx, key);
+                    const speed = baseSpeed * Number(opCfg.speed ?? 1.0) * Number(uCfg.speed ?? 1.0);
+                    const phase = Number(uCfg.phase ?? 0.0);
+                    const wave = animationWave(waveMode, t * speed + phase);
+                    const delta = wave * Number(uCfg.range ?? 0) * baseStrength;
+                    nextUniversal[key] = (Number(s.universal[key]) || 0) + delta;
+                });
                 return { ...s, params: nextParams, universal: nextUniversal };
             });
+        };
+
+        const extractAlphaFromPixels = (pixels) => {
+            const alpha = new Uint8Array(pixels.length / 4);
+            for (let i = 0, j = 0; i < pixels.length; i += 4, j++) alpha[j] = pixels[i + 3];
+            return alpha;
+        };
+
+        const computeFrameDelta = (prevAlpha, nextAlpha) => {
+            if (!prevAlpha || !nextAlpha || prevAlpha.length !== nextAlpha.length) return 0;
+            let diff = 0;
+            for (let i = 0; i < prevAlpha.length; i++) diff += Math.abs(prevAlpha[i] - nextAlpha[i]);
+            return diff / (prevAlpha.length * 255);
+        };
+
+        const computeTemporalChangeMetrics = (alphaFrames, opts = {}) => {
+            const frames = Array.isArray(alphaFrames) ? alphaFrames : [];
+            const frameCount = frames.length;
+            if (frameCount < 2) {
+                return {
+                    changeScore: 0,
+                    jitterScore: 0,
+                    similarityCurve: [],
+                    dissimilarityCurve: []
+                };
+            }
+            const anchor = Math.max(1, Math.min(frameCount - 1, Number(opts.anchorIndex ?? (frameCount - 1))));
+            const reference = frames[anchor];
+            let weightedSum = 0;
+            let weightTotal = 0;
+            const similarityCurve = [];
+            const dissimilarityCurve = [];
+            for (let t = 0; t < anchor; t++) {
+                const dissimilarity = computeFrameDelta(frames[t], reference);
+                const similarity = 1 - dissimilarity;
+                const weight = (anchor - t) / anchor;
+                similarityCurve.push(similarity);
+                dissimilarityCurve.push(dissimilarity);
+                weightedSum += weight * dissimilarity;
+                weightTotal += weight;
+            }
+            const changeScore = weightTotal > 0 ? (weightedSum / weightTotal) : 0;
+            let jitterSum = 0;
+            let jitterCount = 0;
+            for (let t = 1; t < frameCount; t++) {
+                jitterSum += computeFrameDelta(frames[t - 1], frames[t]);
+                jitterCount++;
+            }
+            const jitterScore = jitterCount > 0 ? (jitterSum / jitterCount) : 0;
+            return { changeScore, jitterScore, similarityCurve, dissimilarityCurve };
+        };
+
+        const evaluateFlipbookFrames = (analyses, alphaFrames, qualityConfig) => {
+            const quality = qualityConfig || {};
+            if (quality.enabled === false) return { pass: true, reason: '', metrics: {} };
+            const frameCount = Math.max(1, analyses.length);
+            const minDensity = Number(quality.minFrameDensity ?? 0);
+            const maxEmptyRatio = Number(quality.maxEmptyFrameRatio ?? 1);
+            const minTemporalChange = Number(quality.minTemporalChange ?? quality.minFrameDelta ?? 0);
+            const maxTemporalChange = Number(quality.maxTemporalChange ?? 1);
+            const maxJitter = Number(quality.maxJitter ?? quality.maxFrameDelta ?? 1);
+            let empty = 0;
+            analyses.forEach((a) => { if (!a || a.density < minDensity) empty++; });
+            const emptyRatio = empty / frameCount;
+            const temporal = computeTemporalChangeMetrics(alphaFrames, { anchorIndex: Math.max(1, (alphaFrames?.length || 1) - 1) });
+            const metrics = {
+                emptyRatio,
+                changeScore: temporal.changeScore,
+                jitterScore: temporal.jitterScore
+            };
+            if (emptyRatio > maxEmptyRatio) return { pass: false, reason: 'too_many_empty_frames', metrics };
+            if (temporal.changeScore < minTemporalChange) return { pass: false, reason: 'motion_too_static', metrics };
+            if (temporal.changeScore > maxTemporalChange || temporal.jitterScore > maxJitter) return { pass: false, reason: 'motion_too_busy', metrics };
+            return { pass: true, reason: '', metrics };
         };
 
         const computeAlphaHash = (pixels, width, height) => {
