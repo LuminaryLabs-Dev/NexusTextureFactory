@@ -1,25 +1,26 @@
 	        function useAppViewModel() {
-            const [activeTab, setActiveTab] = useState('generator'); const [showGizmos, setShowGizmos] = useState(true); const [enableAI, setEnableAI] = useState(true); const [autoAnimateFrames, setAutoAnimateFrames] = useState(false);
+            const [activeTab, setActiveTab] = useState('generator'); const [showGizmos, setShowGizmos] = useState(true); const [enableAI, setEnableAI] = useState(true); const [autoAnimateFrames, setAutoAnimateFrames] = useState(false); const [useWorkbenchSeed, setUseWorkbenchSeed] = useState(false);
             const [erosion, setErosion] = useState(0); const [profileName, setProfileName] = useState("Texture_01");
             const [storageUsedBytes, setStorageUsedBytes] = useState(0); const [storageQuotaBytes, setStorageQuotaBytes] = useState(0);
             const [selectedRes, setSelectedRes] = useState([2048]);
             const [steps, setSteps] = useState([{ id: 's1', typeDef: STEP_TYPES.BASE_SHAPE, active: true, blendMode: 0, params: STEP_TYPES.BASE_SHAPE.params, universal: { power: 1, mult: 1, scale: 1, offsetX: 0, offsetY: 0 }, previewUrl: null }]);
             const [previewUrls, setPreviewUrls] = useState([]); const [finalPreviewUrl, setFinalPreviewUrl] = useState(null);
 	            const [customOperations, setCustomOperations] = useState([]);
-	            const [filterModules, setFilterModules] = useState(createDefaultFilterModules());
+            const [filterModules, setFilterModules] = useState(createDefaultFilterModules());
             const [qualityFilters, setQualityFilters] = useState({
-                alpha: { enabled: true, min: 0.15, max: 0.75, expanded: true },
+                alpha: { enabled: true, min: 0.05, max: 0.75, expanded: true },
                 similarity: { enabled: false, maxSimilarity: 0.9, historySize: 200, expanded: false },
                 shape: { enabled: false, minCircularity: 0.2, maxCircularity: 1.0, minSquareness: 0.2, maxSquareness: 1.0, expanded: false },
-                temporalChange: { enabled: true, minChange: 0.12, maxChange: 0.95, maxJitter: 0.2, expanded: false },
-                simplicity: { enabled: true, min: 0.1, max: 0.9, expanded: false }
+                temporalChange: { enabled: true, minChange: 0.04, maxChange: 0.95, maxJitter: 0.2, expanded: true },
+                simplicity: { enabled: false, min: 0.1, max: 0.9, expanded: false }
             });
             const [packConfig, setPackConfig] = useState({
                 groupBy: 'volume_fill',
                 groupDepth: 2,
                 maxItemsPerPack: 50,
                 sortBy: 'none',
-                sortDir: 'asc'
+                sortDir: 'asc',
+                setNameOverrides: {}
             });
             const [flipbookConfig, setFlipbookConfig] = useState(createDefaultFlipbookConfig());
 	            const [dreamParams, setDreamParams] = useState({ overdrive: 0, generationWorkers: 5, packagingWorkers: 5, refineCycles: 1, minDensity: 0.15, maxDensity: 0.75, minSimplicity: 0.1, maxSimplicity: 0.9, varianceStrictness: 0.1, randStrength: 0.5, flipFrames: 16, prompt: "", minComplexity: 5, maxComplexity: 10, resultFillMode: 'slide' });
@@ -34,33 +35,60 @@
 	            const dreamResultsRef = useRef(dreamState.results);
 	            const deleteHistoryRef = useRef(deleteHistory);
 	            const persistTimerRef = useRef(null);
+            const hydratedLibraryUrlsRef = useRef(new Map());
             const dreamRunIdRef = useRef(0);
             const dreamStopRequestedRef = useRef(false);
 
 	            useEffect(() => { eR.current = new TextureEngine(256, 256); bER.current = new TextureEngine(64, 64); }, []);
-	            useEffect(() => { if (!eR.current) return; eR.current.renderStack(steps); setPreviewUrls(steps.map((_, i) => eR.current.getTextureUrl(i))); setFinalPreviewUrl(eR.current.getTextureUrl(steps.length - 1)); }, [steps]);
+	            useEffect(() => {
+                if (!eR.current) return;
+                eR.current.renderStack(steps);
+                const nextPreviewUrls = steps.map((_, i) => eR.current.getTextureUrl(i));
+                const nextFinalPreviewUrl = nextPreviewUrls[steps.length - 1] || null;
+                setPreviewUrls((prev) => {
+                    if (prev.length === nextPreviewUrls.length && prev.every((url, idx) => url === nextPreviewUrls[idx])) return prev;
+                    return nextPreviewUrls;
+                });
+                setFinalPreviewUrl((prev) => prev === nextFinalPreviewUrl ? prev : nextFinalPreviewUrl);
+                setSteps((prev) => {
+                    let changed = prev.length !== nextPreviewUrls.length;
+                    const next = prev.map((step, idx) => {
+                        const previewUrl = nextPreviewUrls[idx] || null;
+                        if (step.previewUrl === previewUrl) return step;
+                        changed = true;
+                        return { ...step, previewUrl };
+                    });
+                    return changed ? next : prev;
+                });
+            }, [steps]);
 	            useEffect(() => { savedLibraryRef.current = savedLibrary; }, [savedLibrary]);
 	            useEffect(() => { dreamResultsRef.current = dreamState.results; }, [dreamState.results]);
 	            useEffect(() => { deleteHistoryRef.current = deleteHistory; }, [deleteHistory]);
-            useEffect(() => {
-                setDreamState(prev => {
-                    const prevResults = Array.isArray(prev.results) ? prev.results : [];
-                    const prevReal = prevResults.filter(it => it && !it.__slotOpen && it.id);
-                    const prevById = new Map(prevReal.map(it => [it.id, it]));
-                    const nextResults = savedLibrary.map(libItem => {
-                        const prevItem = prevById.get(libItem.id);
-                        if (prevItem && prevItem.url) return { ...libItem, url: prevItem.url };
-                        return { ...libItem, url: null };
-                    });
-                    if (nextResults.length === prevResults.length) {
-                        let sameOrder = true;
-                        for (let i = 0; i < nextResults.length; i++) {
-                            if (nextResults[i]?.id !== prevResults[i]?.id) {
-                                sameOrder = false;
-                                break;
-                            }
-                        }
-                        if (sameOrder) return prev;
+            useEffect(() => () => {
+                hydratedLibraryUrlsRef.current.forEach((url) => {
+                    if (url) URL.revokeObjectURL(url);
+                });
+                hydratedLibraryUrlsRef.current.clear();
+            }, []);
+	            useEffect(() => {
+	                setDreamState(prev => {
+	                    const prevResults = Array.isArray(prev.results) ? prev.results : [];
+	                    const prevReal = prevResults.filter(it => it && !it.__slotOpen && it.id);
+	                    const prevById = new Map(prevReal.map(it => [it.id, it]));
+	                    const nextResults = savedLibrary.map(libItem => {
+	                        const prevItem = prevById.get(libItem.id);
+	                        const resolvedUrl = libItem.url || prevItem?.url || null;
+	                        return { ...libItem, url: resolvedUrl };
+	                    });
+	                    if (nextResults.length === prevResults.length) {
+	                        let sameOrder = true;
+	                        for (let i = 0; i < nextResults.length; i++) {
+	                            if (nextResults[i]?.id !== prevResults[i]?.id || nextResults[i]?.url !== prevResults[i]?.url) {
+	                                sameOrder = false;
+	                                break;
+	                            }
+	                        }
+	                        if (sameOrder) return prev;
                     }
                     return { ...prev, results: nextResults };
                 });
@@ -144,13 +172,14 @@
                             }));
                         }
                     }
-                    const rawUiPrefs = localStorage.getItem(META_KEY_UI_PREFS);
-                    if (rawUiPrefs) {
-                        const parsed = JSON.parse(rawUiPrefs);
-                        if (parsed && typeof parsed === 'object') {
-                            if (typeof parsed.autoAnimateFrames === 'boolean') setAutoAnimateFrames(parsed.autoAnimateFrames);
-                        }
-                    }
+	                    const rawUiPrefs = localStorage.getItem(META_KEY_UI_PREFS);
+	                    if (rawUiPrefs) {
+	                        const parsed = JSON.parse(rawUiPrefs);
+	                        if (parsed && typeof parsed === 'object') {
+	                            if (typeof parsed.autoAnimateFrames === 'boolean') setAutoAnimateFrames(parsed.autoAnimateFrames);
+                            if (typeof parsed.useWorkbenchSeed === 'boolean') setUseWorkbenchSeed(parsed.useWorkbenchSeed);
+	                        }
+	                    }
                     const rawPackConfig = localStorage.getItem(META_KEY_PACK_CONFIG);
                     if (rawPackConfig) {
                         const parsed = JSON.parse(rawPackConfig);
@@ -164,18 +193,82 @@
                 } catch (_) { }
                 hasHydratedMetaRef.current = true;
             }, [mergeFlipbookConfig]);
+            useEffect(() => {
+                const activeIds = new Set(savedLibrary.map((item) => item.id));
+                hydratedLibraryUrlsRef.current.forEach((url, id) => {
+                    if (activeIds.has(id)) return;
+                    if (url) URL.revokeObjectURL(url);
+                    hydratedLibraryUrlsRef.current.delete(id);
+                });
+            }, [savedLibrary]);
+            const normalizeExportStem = useCallback((value) => {
+                const raw = String(value || '').trim();
+                const tokens = raw.match(/[A-Za-z0-9]+/g) || [];
+                if (tokens.length === 0) return 'TexturePack';
+                const stem = tokens.map((token) => token.charAt(0).toUpperCase() + token.slice(1)).join('');
+                return stem || 'TexturePack';
+            }, []);
+            useEffect(() => {
+                const targets = savedLibrary.filter((item) => item?.id && item?.storageKey && !item?.url);
+                if (targets.length === 0) return;
+                let cancelled = false;
+                let applied = false;
+                const pendingUrls = [];
+                (async () => {
+                    const resolvedUrls = new Map();
+                    for (const item of targets) {
+                        try {
+                            const blob = await loadTextureBlob(item.storageKey);
+                            if (!blob || cancelled) continue;
+                            const objectUrl = URL.createObjectURL(blob);
+                            pendingUrls.push(objectUrl);
+                            resolvedUrls.set(item.id, objectUrl);
+                        } catch (_) { }
+                    }
+                    if (cancelled || resolvedUrls.size === 0) {
+                        pendingUrls.forEach((url) => URL.revokeObjectURL(url));
+                        return;
+                    }
+                    setSavedLibrary((prev) => {
+                        let changed = false;
+                        const next = prev.map((item) => {
+                            const hydratedUrl = resolvedUrls.get(item.id);
+                            if (!hydratedUrl || item.url) return item;
+                            changed = true;
+                            const priorHydratedUrl = hydratedLibraryUrlsRef.current.get(item.id);
+                            if (priorHydratedUrl && priorHydratedUrl !== hydratedUrl) {
+                                URL.revokeObjectURL(priorHydratedUrl);
+                            }
+                            hydratedLibraryUrlsRef.current.set(item.id, hydratedUrl);
+                            return { ...item, url: hydratedUrl };
+                        });
+                        if (!changed) {
+                            resolvedUrls.forEach((url) => URL.revokeObjectURL(url));
+                            return prev;
+                        }
+                        applied = true;
+                        return next;
+                    });
+                })();
+                return () => {
+                    cancelled = true;
+                    if (!applied) {
+                        pendingUrls.forEach((url) => URL.revokeObjectURL(url));
+                    }
+                };
+            }, [savedLibrary]);
 	            useEffect(() => {
 	                if (!hasHydratedMetaRef.current) return;
 	                if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
 	                persistTimerRef.current = setTimeout(() => {
 	                    persistTimerRef.current = null;
 	                    try {
-	                        localStorage.setItem(META_KEY_LIBRARY, JSON.stringify(savedLibrary));
+	                        localStorage.setItem(META_KEY_LIBRARY, JSON.stringify(savedLibrary.map((item) => ({ ...item, url: null }))));
 	                        localStorage.setItem(META_KEY_CUSTOM_OPS, JSON.stringify(customOperations));
                         localStorage.setItem(META_KEY_FILTER_MODULES, JSON.stringify(filterModules));
                         localStorage.setItem(META_KEY_QUALITY_FILTERS, JSON.stringify(qualityFilters));
                         localStorage.setItem(META_KEY_DREAM_PARAMS, JSON.stringify(dreamParams));
-                        localStorage.setItem(META_KEY_UI_PREFS, JSON.stringify({ autoAnimateFrames }));
+	                        localStorage.setItem(META_KEY_UI_PREFS, JSON.stringify({ autoAnimateFrames, useWorkbenchSeed }));
                         localStorage.setItem(META_KEY_PACK_CONFIG, JSON.stringify(packConfig));
                         localStorage.setItem(META_KEY_FLIPBOOK_CONFIG, JSON.stringify(flipbookConfig));
                     } catch (_) { }
@@ -186,7 +279,7 @@
 	                        persistTimerRef.current = null;
 	                    }
 	                };
-            }, [savedLibrary, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, packConfig, flipbookConfig]);
+            }, [savedLibrary, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, useWorkbenchSeed, packConfig, flipbookConfig]);
 
             const sets = useMemo(() => {
                 const normalizeName = (item) => String(item?.name || 'Misc');
@@ -224,16 +317,20 @@
                 keys.forEach(k => {
                     const its = packConfig.sortBy === 'none' ? [...ts[k]] : [...ts[k]].sort(cmp);
                     if (its.length <= maxItemsPerPack) {
-                        const singleName = packConfig.groupBy === 'volume_fill' ? 'Volume 1' : k;
-                        final.push({ id: k, baseKey: k, name: singleName, items: its });
+                        const setId = k;
+                        const singleName = packConfig.groupBy === 'volume_fill'
+                            ? (packConfig.setNameOverrides?.[setId] || 'Volume 1')
+                            : k;
+                        final.push({ id: setId, baseKey: k, name: singleName, items: its });
                     }
                     else {
                         for (let i = 0; i < its.length; i += maxItemsPerPack) {
                             const vol = Math.floor(i / maxItemsPerPack) + 1;
+                            const setId = `${k}${i}`;
                             const name = packConfig.groupBy === 'volume_fill'
-                                ? `Volume ${vol}`
+                                ? (packConfig.setNameOverrides?.[setId] || `Volume ${vol}`)
                                 : (vol === 1 ? k : `${k} Vol ${vol}`);
-                            final.push({ id: `${k}${i}`, baseKey: k, name, items: its.slice(i, i + maxItemsPerPack) });
+                            final.push({ id: setId, baseKey: k, name, items: its.slice(i, i + maxItemsPerPack) });
                         }
                     }
                 });
@@ -325,11 +422,11 @@
                 return compactResultsByBottomFill(results, shouldRemove);
             };
 
-            const reorderByDrag = (sourceId, targetId) => {
-                const cfg = packConfig || {};
-                const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
-                if (!reorderEnabled) return;
-                if (!sourceId || !targetId || sourceId === targetId) return;
+	            const reorderByDrag = (sourceId, targetId) => {
+	                const cfg = packConfig || {};
+	                const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
+	                if (!reorderEnabled) return;
+	                if (!sourceId || !targetId || sourceId === targetId) return;
 
                 setSavedLibrary(prev => {
                     const fromIndex = prev.findIndex(it => it.id === sourceId);
@@ -341,14 +438,47 @@
                 setDreamState(prev => {
                     const fromIndex = prev.results.findIndex(it => it.id === sourceId);
                     const toIndex = prev.results.findIndex(it => it.id === targetId);
-                    if (fromIndex < 0 || toIndex < 0) return prev;
-                    return { ...prev, results: moveArrayItem(prev.results, fromIndex, toIndex) };
+	                    if (fromIndex < 0 || toIndex < 0) return prev;
+	                    return { ...prev, results: moveArrayItem(prev.results, fromIndex, toIndex) };
+	                });
+	            };
+            const moveLibraryItemToIndex = (itemId, toIndex) => {
+                const cfg = packConfig || {};
+                const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
+                if (!reorderEnabled || !itemId) return;
+                setSavedLibrary((prev) => {
+                    const fromIndex = prev.findIndex((it) => it.id === itemId);
+                    if (fromIndex < 0) return prev;
+                    const boundedTarget = Math.max(0, Math.min(toIndex, prev.length - 1));
+                    return moveArrayItem(prev, fromIndex, boundedTarget);
                 });
+                setDreamState((prev) => {
+                    const fromIndex = prev.results.findIndex((it) => it.id === itemId);
+                    if (fromIndex < 0) return prev;
+                    const boundedTarget = Math.max(0, Math.min(toIndex, prev.results.length - 1));
+                    return { ...prev, results: moveArrayItem(prev.results, fromIndex, boundedTarget) };
+                });
+            };
+            const sendToFront = (itemId) => moveLibraryItemToIndex(itemId, 0);
+            const sendToBack = (itemId) => {
+                const total = savedLibraryRef.current?.length || savedLibrary.length || 0;
+                moveLibraryItemToIndex(itemId, Math.max(0, total - 1));
             };
 
             const handleRenameSet = (targetSet, newName) => {
-                if (packConfig.groupBy === 'volume_fill') return;
-                const newNameBase = (newName || '').trim().replace(/\s+/g, '_') || 'Set';
+                const trimmedName = (newName || '').trim();
+                if (!trimmedName) return;
+                if (packConfig.groupBy === 'volume_fill') {
+                    setPackConfig(prev => ({
+                        ...prev,
+                        setNameOverrides: {
+                            ...(prev?.setNameOverrides || {}),
+                            [targetSet?.id || '__all__']: trimmedName
+                        }
+                    }));
+                    return;
+                }
+                const newNameBase = trimmedName.replace(/\s+/g, '_') || 'Set';
                 setSavedLibrary(prev => {
                     const setItemIds = new Set(Array.isArray(targetSet?.items) ? targetSet.items.map(i => i.id) : []);
                     let groupItems = prev.filter(i => setItemIds.has(i.id));
@@ -377,6 +507,113 @@
                     params: { ...m.params },
                     universal: { ...m.universal }
                 }));
+            const UNIVERSAL_VARIATION_RANGES = {
+                power: { min: 0, max: 4, step: 0.05 },
+                mult: { min: 0, max: 5, step: 0.05 },
+                scale: { min: 0, max: 2, step: 0.01 }
+            };
+            const clampValue = (value, min, max) => Math.min(max, Math.max(min, value));
+            const quantizeValue = (value, step) => {
+                if (!step || step <= 0) return value;
+                return Math.round(value / step) * step;
+            };
+            const varyBoundedValue = (baseValue, range, strength) => {
+                const numericBase = Number(baseValue);
+                if (!Number.isFinite(numericBase)) return baseValue;
+                const boundedStrength = clampValue(Number(strength) || 0, 0, 1);
+                if (boundedStrength <= 0) return clampValue(numericBase, range.min, range.max);
+                const span = Number(range.max) - Number(range.min);
+                const jitter = (Math.random() * 2 - 1) * span * boundedStrength;
+                const nextValue = clampValue(numericBase + jitter, range.min, range.max);
+                const quantized = quantizeValue(nextValue, range.step);
+                return clampValue(quantized, range.min, range.max);
+            };
+            const createDreamStepId = (prefix, index) => `${prefix}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`;
+            const cloneSeedStepForDream = (step, index, variationStrength) => {
+                const nextParams = { ...(step.params || {}) };
+                const controls = Array.isArray(step?.typeDef?.controls) ? step.typeDef.controls : [];
+                controls.forEach((control) => {
+                    if (control.type !== 'slider') return;
+                    if (!Object.prototype.hasOwnProperty.call(nextParams, control.key)) return;
+                    nextParams[control.key] = varyBoundedValue(nextParams[control.key], control, variationStrength);
+                });
+                const nextUniversal = { ...(step.universal || {}) };
+                Object.entries(UNIVERSAL_VARIATION_RANGES).forEach(([key, range]) => {
+                    if (!Object.prototype.hasOwnProperty.call(nextUniversal, key)) return;
+                    nextUniversal[key] = varyBoundedValue(nextUniversal[key], range, variationStrength);
+                });
+                return {
+                    ...step,
+                    id: createDreamStepId('seed', index),
+                    params: nextParams,
+                    universal: nextUniversal,
+                    previewUrl: null
+                };
+            };
+            const createRandomBaseStep = () => {
+                const gens = ['BASE_SHAPE', 'BASE_GRAD'];
+                const baseKey = gens[Math.floor(Math.random() * gens.length)];
+                const baseDef = STEP_TYPES[baseKey];
+                const baseParams = { ...baseDef.params };
+                baseDef.controls.forEach((control) => {
+                    if (control.type !== 'slider') return;
+                    baseParams[control.key] = control.min + Math.random() * (control.max - control.min);
+                });
+                return {
+                    id: createDreamStepId('base', 0),
+                    typeDef: baseDef,
+                    active: true,
+                    blendMode: 0,
+                    params: baseParams,
+                    universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 },
+                    previewUrl: null
+                };
+            };
+            const createRandomOperationStep = (ops, index) => {
+                const key = ops[Math.floor(Math.random() * ops.length)];
+                const def = STEP_TYPES[key];
+                const params = { ...def.params };
+                def.controls.forEach((control) => {
+                    if (control.type !== 'slider') return;
+                    params[control.key] = control.min + Math.random() * (control.max - control.min);
+                });
+                return {
+                    id: createDreamStepId('op', index),
+                    typeDef: def,
+                    active: true,
+                    blendMode: def.cat === 'GEN' ? 0 : (def.cat === 'ERODE' ? 1 : 2),
+                    params,
+                    universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 },
+                    previewUrl: null
+                };
+            };
+            const appendDreamTailSteps = (baseSteps, enabledFilterTemplates) => {
+                const next = [...baseSteps];
+                enabledFilterTemplates.forEach((step, idx) => next.push({ ...step, id: createDreamStepId(`gf-${idx}`, idx), previewUrl: null }));
+                const vignetteDef = STEP_TYPES.VIGNETTE;
+                next.push({
+                    id: createDreamStepId('v', next.length),
+                    typeDef: vignetteDef,
+                    active: true,
+                    blendMode: 2,
+                    params: { ...vignetteDef.params, p1: 1, p2: 0.45, p3: 0.2 },
+                    universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 },
+                    previewUrl: null
+                });
+                return next;
+            };
+            const buildDreamSeedConfig = (ops, enabledFilterTemplates) => {
+                const activeSeedSteps = steps.filter((step) => step?.active);
+                const useSeed = useWorkbenchSeed && activeSeedSteps.length > 0;
+                if (!useSeed) return null;
+                const targetCount = Math.floor(Math.random() * (dreamParams.maxComplexity - dreamParams.minComplexity + 1)) + dreamParams.minComplexity;
+                const variedSeed = activeSeedSteps.map((step, index) => cloneSeedStepForDream(step, index, dreamParams.randStrength));
+                const extrasNeeded = Math.max(0, targetCount - variedSeed.length);
+                for (let i = 0; i < extrasNeeded; i++) {
+                    variedSeed.push(createRandomOperationStep(ops, i));
+                }
+                return appendDreamTailSteps(variedSeed, enabledFilterTemplates);
+            };
 
             const getBestSimilarity = (analysisHash, recentHashes, historySize) => {
                 if (!analysisHash || !recentHashes.length) return 0;
@@ -678,27 +915,14 @@
                     lastCommitAt = performance.now();
                 };
 
-                const buildRandomConfig = () => {
-                    const count = Math.floor(Math.random() * (dreamParams.maxComplexity - dreamParams.minComplexity + 1)) + dreamParams.minComplexity;
-                    const ns = [];
-                    const gens = ['BASE_SHAPE', 'BASE_GRAD'];
-                    const baseKey = gens[Math.floor(Math.random() * gens.length)];
-                    const baseDef = STEP_TYPES[baseKey];
-                    const baseParams = { ...baseDef.params };
-                    baseDef.controls.forEach(c => { if (c.type === 'slider') baseParams[c.key] = c.min + Math.random() * (c.max - c.min); });
-                    ns.push({ id: 'b' + Date.now(), typeDef: baseDef, active: true, blendMode: 0, params: baseParams, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
-                    for (let i = 0; i < count; i++) {
-                        const key = ops[Math.floor(Math.random() * ops.length)];
-                        const def = STEP_TYPES[key];
-                        const params = { ...def.params };
-                        def.controls.forEach(c => { if (c.type === 'slider') params[c.key] = c.min + Math.random() * (c.max - c.min); });
-                        ns.push({ id: 'o' + Date.now() + i, typeDef: def, active: true, blendMode: def.cat === 'GEN' ? 0 : (def.cat === 'ERODE' ? 1 : 2), params, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
-                    }
-                    enabledFilterTemplates.forEach(s => ns.push({ ...s, id: `${s.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }));
-                    const vignetteDef = STEP_TYPES.VIGNETTE;
-                    ns.push({ id: 'v' + Date.now(), typeDef: vignetteDef, active: true, blendMode: 2, params: { ...vignetteDef.params, p1: 1, p2: 0.45, p3: 0.2 }, universal: { power: 1.0, mult: 1.0, scale: 1.0, offsetX: 0.0, offsetY: 0.0 } });
-                    return ns;
-                };
+	                const buildRandomConfig = () => {
+	                    const count = Math.floor(Math.random() * (dreamParams.maxComplexity - dreamParams.minComplexity + 1)) + dreamParams.minComplexity;
+	                    const ns = [createRandomBaseStep()];
+	                    for (let i = 0; i < count; i++) {
+	                        ns.push(createRandomOperationStep(ops, i));
+	                    }
+	                    return appendDreamTailSteps(ns, enabledFilterTemplates);
+	                };
 
                 if (hasLibrarySamples) {
                     // Avoid creating extra WebGL contexts; reuse slot 0 engine to build cache.
@@ -739,7 +963,7 @@
                             for (let attempt = 0; attempt < maxAttemptsPerJob; attempt++) {
                                 if (dreamRunIdRef.current !== runId || dreamStopRequestedRef.current) return;
                                 attemptedTotal++;
-                                const cfg = buildRandomConfig();
+	                                const cfg = buildDreamSeedConfig(ops, enabledFilterTemplates) || buildRandomConfig();
                                 const needsLibraryTexture = hasLibrarySamples && cfg.some(s => s?.typeDef && (s.typeDef.id === 110 || s.typeDef.id === 111));
                                 const librarySource = needsLibraryTexture && libraryRenderCache.length > 0 ? libraryRenderCache[Math.floor(Math.random() * libraryRenderCache.length)] : null;
                                 const renderOptions = librarySource ? { librarySource } : undefined;
@@ -868,11 +1092,11 @@
 	                try {
 	                    const zip = new JSZip();
 	                    const rs = [256, 512, 1024, 2048];
-	                    const setName = targetSet.name.replace(/\s+/g, '_');
+	                    const exportStem = normalizeExportStem(targetSet.name);
 	                    const packWorkers = Math.max(1, Math.min(MAX_PACKAGING_WORKERS, parseInt(dreamParams.packagingWorkers || 1)));
 	                    for (const r of rs) {
 	                        setExportPhase(`Exporting ${r}px textures...`);
-	                        const resFolder = zip.folder(`${setName}_${r}`);
+	                        const resFolder = zip.folder(`${exportStem}_${r}`);
 	                        const rendered = new Array(targetSet.items.length);
 	                        const engines = Array.from({ length: Math.min(packWorkers, targetSet.items.length) }, () => new TextureEngine(r, r));
 	                        await VMUtils.runWorkerPool(targetSet.items.length, engines.length || 1, async (idx, slot) => {
@@ -882,22 +1106,20 @@
 	                            rendered[idx] = await engine.getTextureBlob(item.config.length - 1);
 	                        });
 	                        for (let idx = 0; idx < targetSet.items.length; idx++) {
-	                            const fileName = `${setName}_${(idx + 1).toString().padStart(2, '0')}`;
+	                            const fileName = `${exportStem}_${(idx + 1).toString().padStart(2, '0')}_x${r}`;
 	                            resFolder.file(`${fileName}.png`, rendered[idx] || new Blob());
 	                        }
 	                    }
-	                    const flipbooksRoot = zip.folder(`${setName}_Flipbooks`);
+	                    const flipbooksRoot = zip.folder(`${exportStem}_Flipbooks`);
 	                    for (let itIdx = 0; itIdx < targetSet.items.length; itIdx++) {
 	                        const item = targetSet.items[itIdx];
 	                        const indexPadded = (itIdx + 1).toString().padStart(2, '0');
-	                        const baseFileName = `${setName}_${indexPadded}`;
+	                        const baseFileName = `${exportStem}_${indexPadded}`;
 	                        const fE = new TextureEngine(1024, 1024);
 	                        const base = JSON.parse(JSON.stringify(item.config));
-                            const indexFolderName = `${setName}_${indexPadded}_Flipbooks`;
-                            const indexFolder = flipbooksRoot.folder(indexFolderName);
 	                        for (const mult of [4, 8, 16]) {
 	                            setExportPhase(`Packing ${baseFileName} x${mult}...`);
-                                const flipbookFileName = `${setName}_${indexPadded}_x${mult}_Flipbook`;
+                                const flipbookFileName = `${exportStem}_${indexPadded}_x${mult}_Flipbook`;
 	                            const sC = document.createElement('canvas');
 	                            sC.width = 1024 * mult;
 	                            sC.height = 1024;
@@ -930,12 +1152,12 @@
 	                            const spriteSheetBlob = await new Promise((resolve) => {
 	                                sC.toBlob((blob) => resolve(blob || new Blob()), 'image/png');
 	                            });
-	                            indexFolder.file(`${flipbookFileName}.png`, spriteSheetBlob);
+	                            flipbooksRoot.file(`${flipbookFileName}.png`, spriteSheetBlob);
 	                        }
 	                    }
 	                    setExportPhase('Finalizing ZIP...');
 	                    const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
-	                    VMUtils.triggerBlobDownload(blob, `${setName}_Pack.zip`);
+	                    VMUtils.triggerBlobDownload(blob, `${exportStem}_Pack.zip`);
 	                    setExportPhase('Download started.');
 	                } catch (e) {
 	                    console.error(e);
@@ -1022,8 +1244,8 @@
                 }));
             };
 
-            return {
-                ui: { activeTab, setActiveTab, showGizmos, setShowGizmos, enableAI, setEnableAI, autoAnimateFrames, setAutoAnimateFrames },
+	            return {
+	                ui: { activeTab, setActiveTab, showGizmos, setShowGizmos, enableAI, setEnableAI, autoAnimateFrames, setAutoAnimateFrames, useWorkbenchSeed, setUseWorkbenchSeed },
                 storage: { usedBytes: storageUsedBytes, quotaBytes: storageQuotaBytes },
                 customOps: { items: customOperations, add: (op) => setCustomOperations(prev => [...prev, op]) },
                 flipbook: {
@@ -1184,15 +1406,17 @@
                         if (removed?.storageKey) await cleanupStorageIfUnreferenced(removed.storageKey, nextLibrary, nextResults);
                     }
                 },
-                library: {
-                    items: savedLibrary,
-                    sets,
-                    packConfig,
-                    setPackConfig,
-                    reorganizePacks,
-                    reorderByDrag,
-                    onSave: (it) => setSavedLibrary(p => [...p, { ...it, url: null }]),
-                    onLoad: (cfg) => { setSteps(cfg); setActiveTab('builder'); },
+	                library: {
+	                    items: savedLibrary,
+	                    sets,
+	                    packConfig,
+	                    setPackConfig,
+	                    reorganizePacks,
+	                    reorderByDrag,
+                    sendToFront,
+                    sendToBack,
+	                    onSave: (it) => setSavedLibrary(p => [...p, { ...it, url: null }]),
+	                    onLoad: (cfg) => { setSteps(cfg); setActiveTab('builder'); },
                     onDelete: async (id) => {
                         const currentLibrary = savedLibraryRef.current || savedLibrary;
                         const currentResults = dreamResultsRef.current || dreamState.results;

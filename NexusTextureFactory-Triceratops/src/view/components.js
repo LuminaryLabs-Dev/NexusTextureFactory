@@ -1,4 +1,4 @@
-        function TextureItemFlip({ item, onClick, onSave, onDelete, engine, isRejected, rejectLabel, flipFrames, autoAnimate = false, flipbookConfig = null, dragEnabled = false, onReorder = null }) {
+	        function TextureItemFlip({ item, onClick, onSave, onDelete, engine, isRejected, rejectLabel, flipFrames, autoAnimate = false, flipbookConfig = null, dragEnabled = false, onReorder = null, onSendToFront = null, onSendToBack = null, displayName = null }) {
             const [frames, setFrames] = useState([]); const [fi, setFi] = useState(0); const [isH, setIsH] = useState(false); const [isL, setIsL] = useState(false); const [storedUrl, setStoredUrl] = useState(item.url || null); const [flipbookReject, setFlipbookReject] = useState(''); const hT = useRef(null); const aI = useRef(null);
             const fmtScore = (value) => (typeof value === 'number' && !Number.isNaN(value) ? value.toFixed(2) : '--');
             const fmtPct = (value) => (typeof value === 'number' && !Number.isNaN(value) ? `${(value * 100).toFixed(0)}%` : '--');
@@ -20,27 +20,28 @@
                 if (!sourceId || sourceId === String(item?.id)) return;
                 if (typeof onReorder === 'function') onReorder(sourceId, item.id);
             };
-            useEffect(() => {
-                let revokedUrl = null;
-                let cancelled = false;
-                (async () => {
-                    if (!item?.storageKey) {
-                        setStoredUrl(item?.url || null);
-                        return;
-                    }
-                    try {
-                        const blob = await loadTextureBlob(item.storageKey);
-                        if (!blob || cancelled) return;
-                        const objectUrl = URL.createObjectURL(blob);
-                        revokedUrl = objectUrl;
-                        setStoredUrl(objectUrl);
-                        if (item?.url && typeof item.url === 'string' && item.url.startsWith('blob:')) {
-                            URL.revokeObjectURL(item.url);
-                        }
-                    } catch (_) {
-                        if (!cancelled) setStoredUrl(item?.url || null);
-                    }
-                })();
+	            useEffect(() => {
+	                let revokedUrl = null;
+	                let cancelled = false;
+	                (async () => {
+	                    if (item?.url) {
+	                        setStoredUrl(item.url);
+	                        return;
+	                    }
+	                    if (!item?.storageKey) {
+	                        setStoredUrl(item?.url || null);
+	                        return;
+	                    }
+	                    try {
+	                        const blob = await loadTextureBlob(item.storageKey);
+	                        if (!blob || cancelled) return;
+	                        const objectUrl = URL.createObjectURL(blob);
+	                        revokedUrl = objectUrl;
+	                        setStoredUrl(objectUrl);
+	                    } catch (_) {
+	                        if (!cancelled) setStoredUrl(item?.url || null);
+	                    }
+	                })();
                 return () => {
                     cancelled = true;
                     if (revokedUrl) URL.revokeObjectURL(revokedUrl);
@@ -106,16 +107,20 @@
                                 <div>jitter: {fmtPct(item.jitterScore)}</div>
                             </div>
                         </div>
-                        <div className="absolute bottom-0 inset-x-0 bg-black/80 p-1 text-[9px] text-gray-300 truncate text-center font-mono py-1.5">{item.name}</div>
-                        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            {onClick && <button onClick={() => onClick(item.config)} className="w-6 h-6 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Edit">✎</button>}
-                            {onSave && <button onClick={() => onSave(item)} className="w-6 h-6 bg-green-600 hover:bg-green-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Save">💾</button>}
-                            {onDelete && <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="w-6 h-6 bg-gray-600 hover:bg-gray-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Delete">🗑</button>}
-                        </div>
-                    </>)}
-                </div>
-            );
-        }
+                        <div className="absolute bottom-0 inset-x-0 bg-black/80 p-1 text-[9px] text-gray-300 truncate text-center font-mono py-1.5">{displayName || item.name}</div>
+	                        <div className="absolute top-2 right-2 flex flex-col items-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex gap-1">
+	                            {onClick && <button onClick={() => onClick(item.config)} className="w-6 h-6 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Edit">✎</button>}
+	                            {onSave && <button onClick={() => onSave(item)} className="w-6 h-6 bg-green-600 hover:bg-green-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Save">💾</button>}
+	                            {onDelete && <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="w-6 h-6 bg-gray-600 hover:bg-gray-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Delete">🗑</button>}
+                            </div>
+                            {onSendToFront && <button onClick={(e) => { e.stopPropagation(); onSendToFront(item.id); }} className="w-6 h-6 bg-[#1f3b61] hover:bg-[#295181] text-white rounded text-xs flex items-center justify-center shadow-lg" title="Send to Front">↑</button>}
+                            {onSendToBack && <button onClick={(e) => { e.stopPropagation(); onSendToBack(item.id); }} className="w-6 h-6 bg-[#3b2f1f] hover:bg-[#5a482e] text-white rounded text-xs flex items-center justify-center shadow-lg" title="Send to Back">↓</button>}
+	                        </div>
+	                    </>)}
+	                </div>
+	            );
+	        }
 
         function VirtualizedTextureItem(props) {
             const hostRef = useRef(null);
@@ -171,6 +176,10 @@
                 let revokedUrl = null;
                 let cancelled = false;
                 (async () => {
+                    if (item?.url) {
+                        setStoredUrl(item.url);
+                        return;
+                    }
                     if (!item?.storageKey) {
                         setStoredUrl(item?.url || null);
                         return;
@@ -181,9 +190,6 @@
                         const objectUrl = URL.createObjectURL(blob);
                         revokedUrl = objectUrl;
                         setStoredUrl(objectUrl);
-                        if (item?.url && typeof item.url === 'string' && item.url.startsWith('blob:')) {
-                            URL.revokeObjectURL(item.url);
-                        }
                     } catch (_) {
                         if (!cancelled) setStoredUrl(item?.url || null);
                     }
@@ -434,13 +440,13 @@
                             </div>
                         </div>
 	                        {showC && (
-	                            <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 mb-4 overflow-x-auto config-scroll">
-                                    <div className="grid grid-cols-2 gap-8">
+		                            <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 mb-4 overflow-x-auto config-scroll">
+                                    <div className="grid grid-cols-3 gap-6">
                                         <div className="flex flex-col gap-1">
                                             <div className="flex justify-between text-gray-400"><span>Overdrive</span><span>{overdrivePercent}%</span></div>
                                             <input type="range" min="0" max="1" step="0.01" value={overdrive} onChange={(e) => dVM.setParams(p => ({ ...p, overdrive: parseFloat(e.target.value) }))} className="slider-thumb w-full" />
                                         </div>
-	                                    <div className="flex flex-col gap-1">
+		                                    <div className="flex flex-col gap-1">
 	                                        <div className="flex justify-between text-gray-400"><span>Complexity</span><span>{minComplexity}-{maxComplexity}</span></div>
                                             <div ref={complexityRangeRef} className="relative h-4 cursor-pointer" onMouseDown={onComplexityMouseDown}>
                                                 <div className="absolute top-1/2 left-0 right-0 h-1 -translate-y-1/2 rounded bg-[#333]"></div>
@@ -448,7 +454,12 @@
                                                 <div className="absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500" style={{ left: `${minComplexityPercent}%` }}></div>
                                                 <div className="absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500" style={{ left: `${maxComplexityPercent}%` }}></div>
                                             </div>
-	                                    </div>
+		                                    </div>
+                                        <div className="flex flex-col gap-1">
+                                            <div className="flex justify-between text-gray-400"><span>Seed Variation</span><span>{Number(dVM.params.randStrength || 0).toFixed(2)}</span></div>
+                                            <input type="range" min="0" max="1" step="0.01" value={dVM.params.randStrength || 0} onChange={(e) => dVM.setParams(p => ({ ...p, randStrength: parseFloat(e.target.value) }))} disabled={!uiVM?.useWorkbenchSeed} className={`slider-thumb w-full ${uiVM?.useWorkbenchSeed ? '' : 'opacity-40 cursor-not-allowed'}`} />
+                                            <div className="text-[10px] text-gray-500">{uiVM?.useWorkbenchSeed ? 'Applies only to active seeded workbench steps.' : 'Enable workbench seeding in Settings to use this.'}</div>
+                                        </div>
                                     </div>
                             </div>
                         )}
@@ -669,6 +680,13 @@
             const cfg = libVM.packConfig || {};
             const setCfg = (patch) => libVM.setPackConfig(prev => ({ ...prev, ...patch }));
             const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
+            const getExportStemPreview = (value) => {
+                const raw = String(value || '').trim();
+                const tokens = raw.match(/[A-Za-z0-9]+/g) || [];
+                if (tokens.length === 0) return 'TexturePack';
+                return tokens.map((token) => token.charAt(0).toUpperCase() + token.slice(1)).join('') || 'TexturePack';
+            };
+            const getSetItemPreviewName = (setName, itemIndex) => `${getExportStemPreview(setName)}_${String(itemIndex + 1).padStart(2, '0')}_x<res>.png`;
             return (
                 <div className="flex flex-col h-full bg-[#111] p-6">
                     <div className="mb-6">
@@ -732,9 +750,12 @@
                         <div className="space-y-8">{libVM.sets.map(set => (
                             <div key={set.id} className="bg-[#1a1a1a] p-4 rounded-xl border border-gray-800">
                                 <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
-                                    {(cfg.groupBy === 'volume_fill')
-                                        ? <h3 className="text-white font-bold text-sm">{set.name} <span className="text-gray-500 text-xs font-normal">({set.items.length})</span></h3>
-                                        : <EditableSetName set={set} libVM={libVM} />}
+                                    <div className="min-w-0">
+                                        <EditableSetName set={set} libVM={libVM} />
+                                        <div className="text-[10px] text-gray-500 font-mono mt-1 truncate">
+                                            {`${getExportStemPreview(set.name)}_01_x<res>.png`}
+                                        </div>
+                                    </div>
                                     <div className="flex items-center gap-2">
                                         <button onClick={() => libVM.deleteSet(set)} disabled={libVM.exportingSetId !== null} className={`text-[10px] px-3 py-1.5 rounded font-bold transition-colors ${libVM.exportingSetId !== null ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-200'}`}>
                                             DELETE SET
@@ -751,10 +772,10 @@
                                     <div className="text-[10px] text-red-400 mb-3 font-mono">{libVM.exportError}</div>
                                 )}
                                 <div className="grid grid-cols-10 gap-2">
-                                    {set.items.map((it) => <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} dragEnabled={reorderEnabled} onReorder={libVM.reorderByDrag} />)}
-                                </div>
-                            </div>
-                        ))}</div>
+	                                    {set.items.map((it, idx) => <VirtualizedTextureItem key={it.id} item={it} displayName={getSetItemPreviewName(set.name, idx)} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} dragEnabled={reorderEnabled} onReorder={libVM.reorderByDrag} onSendToFront={reorderEnabled ? libVM.sendToFront : null} onSendToBack={reorderEnabled ? libVM.sendToBack : null} />)}
+	                                </div>
+	                            </div>
+	                        ))}</div>
                     </div>
                 </div>
             );
@@ -1052,22 +1073,35 @@ void main() {
                         <p className="text-xs text-gray-400 mt-1">Global runtime and preview behavior.</p>
                     </div>
                     <div className="max-w-xl bg-[#1a1a1a] border border-gray-800 rounded p-4 space-y-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <div className="text-sm font-bold text-white">Auto Animated Frames</div>
-                                <div className="text-xs text-gray-400 mt-1">Auto-play flipbook previews for loaded texture cards without hover.</div>
-                            </div>
+	                        <div className="flex items-center justify-between">
+	                            <div>
+	                                <div className="text-sm font-bold text-white">Auto Animated Frames</div>
+	                                <div className="text-xs text-gray-400 mt-1">Auto-play flipbook previews for loaded texture cards without hover.</div>
+	                            </div>
                             <label className="flex items-center cursor-pointer select-none">
                                 <div className="relative">
                                     <input type="checkbox" checked={!!uiVM.autoAnimateFrames} onChange={(e) => uiVM.setAutoAnimateFrames(e.target.checked)} className="sr-only" />
                                     <div className={`w-10 h-5 rounded-full transition-colors ${uiVM.autoAnimateFrames ? 'bg-blue-600' : 'bg-gray-700'}`}></div>
                                     <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${uiVM.autoAnimateFrames ? 'translate-x-5' : ''}`}></div>
+	                                </div>
+	                            </label>
+	                        </div>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="text-sm font-bold text-white">Use Workbench As Dream Seed</div>
+                                <div className="text-xs text-gray-400 mt-1">When enabled, Dream starts from the active workbench stack before adding extra randomized operations.</div>
+                            </div>
+                            <label className="flex items-center cursor-pointer select-none">
+                                <div className="relative">
+                                    <input type="checkbox" checked={!!uiVM.useWorkbenchSeed} onChange={(e) => uiVM.setUseWorkbenchSeed(e.target.checked)} className="sr-only" />
+                                    <div className={`w-10 h-5 rounded-full transition-colors ${uiVM.useWorkbenchSeed ? 'bg-blue-600' : 'bg-gray-700'}`}></div>
+                                    <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${uiVM.useWorkbenchSeed ? 'translate-x-5' : ''}`}></div>
                                 </div>
                             </label>
                         </div>
-                        <div className="flex flex-col gap-1 text-xs">
-                            <div className="flex justify-between text-gray-400">
-                                <span>Playback Frame Count</span>
+	                        <div className="flex flex-col gap-1 text-xs">
+	                            <div className="flex justify-between text-gray-400">
+	                                <span>Playback Frame Count</span>
                                 <span>{dVM?.params?.flipFrames ?? 16}</span>
                             </div>
                             <input type="range" min="4" max="16" step="4" value={dVM?.params?.flipFrames ?? 16} onChange={(e) => dVM?.setParams(p => ({ ...p, flipFrames: parseInt(e.target.value) }))} className="w-full slider-thumb" />
@@ -1213,8 +1247,28 @@ void main() {
                 if (!nextName || nextName === set.name) return;
                 libVM.renameSet(set, nextName);
             };
-            if (isE) return <input ref={iR} className="bg-[#333] border border-blue-500 rounded px-2 py-0.5 text-white font-bold text-sm outline-none" value={lN} onChange={(e) => setLN(e.target.value)} onBlur={hC} onKeyDown={(e) => e.key === 'Enter' && hC()} />;
-            return <h3 onClick={() => { setLN(set.name); setIsE(true); }} className="text-white font-bold cursor-pointer hover:text-blue-400 transition-colors group flex items-center gap-2 text-sm">{set.name} <span className="opacity-0 group-hover:opacity-100 text-[8px] bg-blue-600/30 px-1 rounded text-blue-300">EDIT</span> <span className="text-gray-500 text-xs font-normal">({set.items.length})</span></h3>;
+            if (isE) {
+                return (
+                    <div className="flex items-center gap-2 min-w-0">
+                        <input ref={iR} className="bg-[#333] border border-blue-500 rounded px-2 py-0.5 text-white font-bold text-sm outline-none min-w-[12rem]" value={lN} onChange={(e) => setLN(e.target.value)} onBlur={hC} onKeyDown={(e) => e.key === 'Enter' && hC()} />
+                        <span className="text-gray-500 text-xs font-normal shrink-0">({set.items.length})</span>
+                    </div>
+                );
+            }
+            return (
+                <div className="flex items-center gap-2 min-w-0">
+                    <h3 className="text-white font-bold text-sm truncate">{set.name}</h3>
+                    <button
+                        type="button"
+                        aria-label={`Rename ${set.name}`}
+                        onClick={() => { setLN(set.name); setIsE(true); }}
+                        className="text-gray-400 hover:text-blue-300 transition-colors text-xs leading-none shrink-0"
+                    >
+                        ✎
+                    </button>
+                    <span className="text-gray-500 text-xs font-normal shrink-0">({set.items.length})</span>
+                </div>
+            );
         }
 
         // ==========================================
