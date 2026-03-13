@@ -1,0 +1,2 @@
+[console_scripts]
+nexus-tezut = nexus_texture_factory_tezut.cli:main

@@ -1,0 +1,31 @@
+# NexusTextureFactory-Tezut
+
+`NexusTextureFactory-Tezut` is a wheel-authoritative Python CLI that ports the
+latest Triceratops texture factory workflow into a local command-line tool.
+
+## Install
+
+```bash
+python -m build
+pip install dist/nexus_texture_factory_tezut-0.1.0-py3-none-any.whl
+```
+
+## Core Commands
+
+```bash
+nexus-tezut stack --help
+nexus-tezut dream --help
+nexus-tezut preview --help
+nexus-tezut sets --help
+nexus-tezut filters --help
+nexus-tezut flipbook --help
+nexus-tezut ops --help
+nexus-tezut custom-ops --help
+nexus-tezut config --help
+```
+
+## Runtime Data
+
+By default the CLI stores session data in `.nexus-tezut/` under the current
+working directory. Set `NEXUS_TEZUT_HOME` to override the runtime folder.
+
