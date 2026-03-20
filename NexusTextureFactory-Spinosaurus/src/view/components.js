@@ -196,7 +196,7 @@
             );
         }
 
-        function FactoryLadderItem({ item, onClick, maskViewMode = DEFAULT_MASK_VIEW_MODE }) {
+        function FactoryLadderItem({ item, onClick, maskViewMode = DEFAULT_MASK_VIEW_MODE, setName = '' }) {
             const [storedUrl, setStoredUrl] = useState(item.url || null);
             const [displayUrl, setDisplayUrl] = useState(item.url || null);
             const fmtScore = (value) => (typeof value === 'number' && !Number.isNaN(value) ? value.toFixed(2) : '--');
@@ -258,7 +258,10 @@
                         <img src={displayUrl || storedUrl || item.url} className="w-full h-full object-contain" />
                     </div>
                     <div className="flex-1 px-3 py-2 flex flex-col justify-between">
-                        <div className="text-[11px] text-white font-mono truncate">{item.name}</div>
+                        <div>
+                            <div className="text-[11px] text-white font-mono truncate">{item.name}</div>
+                            {setName && <div className="text-[9px] text-blue-300 font-mono mt-1 uppercase tracking-wide">{setName}</div>}
+                        </div>
                         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-gray-400 font-mono">
                             <div>alpha: {fmtScore(item.density)}</div>
                             <div>simple: {fmtScore(item.sScore)}</div>
@@ -422,8 +425,6 @@
             const pageEnd = pageStart + pageSize;
             const pageResults = results.slice(pageStart, pageEnd);
             const liveStart = Math.max(0, pageResults.length - 24);
-            const cfg = libVM?.packConfig || {};
-            const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
             const complexityRangeRef = useRef(null);
             const complexityDragHandleRef = useRef(null);
             const complexityMinBound = 1;
@@ -494,7 +495,7 @@
                         </div>
 	                        {showC && (
 		                            <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 mb-4 overflow-x-auto config-scroll">
-                                    <div className="grid grid-cols-3 gap-6">
+                                    <div className="grid grid-cols-4 gap-6">
                                         <div className="flex flex-col gap-1">
                                             <div className="flex justify-between text-gray-400"><span>Overdrive</span><span>{overdrivePercent}%</span></div>
                                             <input type="range" min="0" max="1" step="0.01" value={overdrive} onChange={(e) => dVM.setParams(p => ({ ...p, overdrive: parseFloat(e.target.value) }))} className="slider-thumb w-full" />
@@ -513,6 +514,13 @@
                                             <input type="range" min="0" max="1" step="0.01" value={dVM.params.randStrength || 0} onChange={(e) => dVM.setParams(p => ({ ...p, randStrength: parseFloat(e.target.value) }))} disabled={!uiVM?.useWorkbenchSeed} className={`slider-thumb w-full ${uiVM?.useWorkbenchSeed ? '' : 'opacity-40 cursor-not-allowed'}`} />
                                             <div className="text-[10px] text-gray-500">{uiVM?.useWorkbenchSeed ? 'Applies only to active seeded workbench steps.' : 'Enable workbench seeding in Settings to use this.'}</div>
                                         </div>
+                                        <div className="flex flex-col gap-1">
+                                            <div className="flex justify-between text-gray-400"><span>Target Set</span><span>{libVM?.activeTargetSet?.name || 'Volume 1'}</span></div>
+                                            <select value={libVM?.activeTargetSetId || ''} onChange={(e) => libVM?.setActiveTargetSetId?.(e.target.value)} className="bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-sm text-white">
+                                                {(libVM?.sets || []).map((setRecord) => <option key={setRecord.id} value={setRecord.id}>{setRecord.name}</option>)}
+                                            </select>
+                                            <div className="text-[10px] text-gray-500">Dream and manual saves route through this set before any fail target is applied.</div>
+                                        </div>
                                     </div>
                             </div>
                         )}
@@ -522,7 +530,12 @@
                         {dVM.isDreaming && <div className="fixed top-24 left-1/2 -translate-x-1/2 bg-black/90 px-6 py-2 rounded-full border border-purple-500 text-purple-400 text-xs font-mono animate-pulse z-40 shadow-2xl">{dVM.state.phase} | attempts: {dVM.state.pendingAttempts || 0} | accepted: {dVM.state.pendingAccepted || 0} | rejected: {dVM.state.pendingRejected || 0} | gen:{dVM.state.activeGenWorkers || 0} | backfill:{dVM.state.activeBackfillWorkers || 0} | queue:{dVM.state.pendingBackfill || 0}</div>}
                         <div className="grid grid-cols-2 gap-2">{pageResults.map((it, idx) => {
                             if (it?.__slotOpen) return <OpenFactorySlotRow key={it.id} />;
-                            const itemProps = { item: it, onClick: libVM.onLoad, maskViewMode: uiVM?.maskViewMode };
+                            const itemProps = {
+                                item: it,
+                                onClick: libVM.onLoad,
+                                maskViewMode: uiVM?.maskViewMode,
+                                setName: libVM?.getSetNameById?.(libVM?.getItemSetId?.(it.id))
+                            };
                             return idx >= liveStart ? <FactoryLadderItem key={it.id} {...itemProps} /> : <VirtualizedFactoryItem key={it.id} {...itemProps} />;
                         })}</div>
                         <div className="mt-4 flex items-center justify-center gap-2">
@@ -550,7 +563,8 @@
                 <div className="flex flex-col h-full bg-[#111] p-6">
                     <div className="mb-4">
                         <h2 className="text-xl font-bold text-white">FILTERS</h2>
-                        <p className="text-xs text-gray-400 mt-1">Configure acceptance gates and operation modules used during generation.</p>
+                        <p className="text-xs text-gray-400 mt-1">Configure global/default filter templates and operation modules used during generation.</p>
+                        <div className="mt-2 text-[11px] text-blue-300 font-mono">Set-local quality policy now lives in SETS. FILTERS remains the shared default/template surface.</div>
                     </div>
                     <div className="flex-1 overflow-y-auto space-y-3 pr-1">
                         <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Acceptance Filters</div>
@@ -729,10 +743,65 @@
             );
         }
 
+        function SetQualityPanel({ setRecord, libVM }) {
+            const quality = setRecord?.qualityFilters || {};
+            const failTargets = (libVM?.sets || []).filter((candidate) => candidate.id !== setRecord.id);
+            return (
+                <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-4 text-xs">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-gray-400">Evaluation Stage</label>
+                            <select value={setRecord.evaluationStage || DEFAULT_SET_EVALUATION_STAGE} onChange={(e) => libVM.updateSetPolicy(setRecord.id, { evaluationStage: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white" disabled={!!setRecord.system && setRecord.id === REJECTS_SET_ID}>
+                                {SET_EVALUATION_STAGES.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
+                            </select>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="text-gray-400">Fail Target</label>
+                            <select value={setRecord.failTargetSetId || ''} onChange={(e) => libVM.updateSetPolicy(setRecord.id, { failTargetSetId: e.target.value || null })} className="bg-[#333] border border-gray-600 rounded p-1 text-white" disabled={setRecord.id === REJECTS_SET_ID}>
+                                {failTargets.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+                            </select>
+                        </div>
+                    </div>
+
+                    {[
+                        { key: 'alpha', label: 'Alpha Overall', controls: [['min', 'Min Alpha Density', 0, 1, 0.01], ['max', 'Max Alpha Density', 0, 1, 0.01]] },
+                        { key: 'similarity', label: 'Similarity To Previous', controls: [['maxSimilarity', 'Max Similarity', 0, 1, 0.01], ['historySize', 'History Size', 10, 500, 10]] },
+                        { key: 'shape', label: 'Shape Bias (Circle / Square)', controls: [['minCircularity', 'Min Circularity', 0, 1, 0.01], ['maxCircularity', 'Max Circularity', 0, 1, 0.01], ['minSquareness', 'Min Squareness', 0, 1, 0.01], ['maxSquareness', 'Max Squareness', 0, 1, 0.01]] },
+                        { key: 'temporalChange', label: 'Temporal Change', controls: [['minChange', 'Min Change', 0, 1, 0.01], ['maxChange', 'Max Change', 0, 1, 0.01], ['maxJitter', 'Max Jitter', 0, 1, 0.01]], format: 'percent' },
+                        { key: 'simplicity', label: 'Simplicity / Smoothness', controls: [['min', 'Min Simplicity', 0, 1, 0.01], ['max', 'Max Simplicity', 0, 1, 0.01]] }
+                    ].map((section) => {
+                        const current = quality[section.key] || {};
+                        const fmt = (value) => section.format === 'percent' ? `${(Number(value || 0) * 100).toFixed(0)}%` : Number(value || 0).toFixed(2);
+                        return (
+                            <div key={section.key} className="bg-[#141414] border border-gray-800 rounded overflow-hidden">
+                                <div className="flex items-center justify-between px-3 py-2 bg-[#202020]">
+                                    <button onClick={() => libVM.toggleSetQualityExpanded(setRecord.id, section.key)} className="text-sm font-bold text-white">{section.label}</button>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => libVM.toggleSetQualityEnabled(setRecord.id, section.key)} className={`text-[10px] px-2 py-1 rounded font-bold ${current.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{current.enabled ? 'ON' : 'OFF'}</button>
+                                        <button onClick={() => libVM.toggleSetQualityExpanded(setRecord.id, section.key)} className="text-xs text-gray-400 w-6">{current.expanded ? '▼' : '▶'}</button>
+                                    </div>
+                                </div>
+                                {current.expanded && (
+                                    <div className="p-3 text-xs space-y-3">
+                                        {section.controls.map(([field, label, min, max, step]) => (
+                                            <div key={field} className="flex flex-col gap-1">
+                                                <div className="flex justify-between"><span className="text-gray-400">{label}</span><span>{fmt(current[field])}</span></div>
+                                                <input type="range" min={min} max={max} step={step} value={current[field]} onChange={(e) => libVM.updateSetQuality(setRecord.id, section.key, field, field === 'historySize' ? parseInt(e.target.value, 10) : parseFloat(e.target.value))} className="w-full slider-thumb" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        }
+
         function SetsTab({ libVM, previewEngine, uiVM, flipbookVM }) {
             const cfg = libVM.packConfig || {};
             const setCfg = (patch) => libVM.setPackConfig(prev => ({ ...prev, ...patch }));
-            const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
+            const reorderEnabled = (cfg.sortBy || 'none') === 'none';
             const gridColumns = Math.max(1, Math.min(12, Number(uiVM?.gridColumns ?? DEFAULT_SET_GRID_COLUMNS) || DEFAULT_SET_GRID_COLUMNS));
             const getExportStemPreview = (value) => {
                 const raw = String(value || '').trim();
@@ -741,95 +810,113 @@
                 return tokens.map((token) => token.charAt(0).toUpperCase() + token.slice(1)).join('') || 'TexturePack';
             };
             const getSetItemPreviewName = (setName, itemIndex) => `${getExportStemPreview(setName)}_${String(itemIndex + 1).padStart(2, '0')}_x<res>.png`;
+            const selectedSet = libVM.selectedSet || libVM.sets?.[0] || null;
             return (
                 <div className="flex flex-col h-full bg-[#111] p-6">
                     <div className="mb-6">
                         <h2 className="text-xl font-bold text-white">SETS</h2>
                     </div>
                     <div className="flex-1 overflow-y-auto">
-                        <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 mb-6">
-                        <div className="text-[11px] font-bold text-gray-300 mb-3 uppercase tracking-wide">Pack Sorting Config</div>
-                        <div className="flex justify-end mb-3 gap-2">
+                        <div className="flex items-center justify-between gap-4 mb-4">
+                            <div className="flex flex-wrap gap-2">
+                                {(libVM.sets || []).map((setRecord) => (
+                                    <button key={setRecord.id} onClick={() => libVM.setSelectedSetId(setRecord.id)} className={`px-3 py-1.5 rounded text-[11px] font-bold border ${libVM.selectedSetId === setRecord.id ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#1a1a1a] border-gray-800 text-gray-300 hover:border-gray-700'}`}>
+                                        {setRecord.name}
+                                    </button>
+                                ))}
+                                <button onClick={() => libVM.createSet?.()} className="px-3 py-1.5 rounded text-[11px] font-bold border bg-[#1a2a1a] border-green-800 text-green-300 hover:bg-[#214021]">
+                                    + NEW SET
+                                </button>
+                            </div>
                             <button onClick={() => libVM.deleteAllSets?.()} disabled={libVM.exportingSetId !== null || (libVM.items || []).length === 0} className={`text-[10px] px-3 py-1.5 rounded font-bold border ${libVM.exportingSetId !== null || (libVM.items || []).length === 0 ? 'bg-[#171717] border-gray-800 text-gray-600 cursor-not-allowed' : 'bg-[#2a1515] border-red-900 text-red-300 hover:bg-red-700/50 hover:text-white'}`}>
-                                DELETE ALL SETS
-                            </button>
-                            <button onClick={() => libVM.reorganizePacks?.()} className="text-[10px] px-3 py-1.5 rounded font-bold bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-200 border border-gray-700">
-                                REORGANIZE PACKS
+                                CLEAR WORKSPACE
                             </button>
                         </div>
-                        <div className="grid grid-cols-4 gap-3 text-xs">
-                                <div className="flex flex-col gap-1">
-                                    <label className="text-gray-400">Group By</label>
-                                    <select value={cfg.groupBy || 'prefix'} onChange={(e) => setCfg({ groupBy: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
-                                        <option value="prefix">Name Prefix</option>
-                                        <option value="shape_variant">Shape + Variant</option>
-                                        <option value="full">Full Name</option>
-                                        <option value="volume_fill">Volume Fill</option>
-                                    </select>
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                    <label className="text-gray-400">Sort By</label>
-                                    <select value={cfg.sortBy || 'none'} onChange={(e) => setCfg({ sortBy: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
-                                        <option value="none">None</option>
-                                        <option value="name">Name</option>
-                                        <option value="density">Alpha Density</option>
-                                        <option value="simplicity">Simplicity</option>
-                                        <option value="circularity">Circularity</option>
-                                        <option value="squareness">Squareness</option>
-                                    </select>
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                    <label className="text-gray-400">Direction</label>
-                                    <select value={cfg.sortDir || 'asc'} onChange={(e) => setCfg({ sortDir: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
-                                        <option value="asc">Ascending</option>
-                                        <option value="desc">Descending</option>
-                                    </select>
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                    <label className="text-gray-400">Sets</label>
-                                    <div className="bg-[#252525] border border-gray-700 rounded p-1.5 text-gray-300">{libVM.sets.length}</div>
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4 mt-4">
-                                <div className="flex flex-col gap-1 text-xs">
-                                    <div className="flex justify-between"><label className="text-gray-400">Max Items Per Pack</label><span>{cfg.maxItemsPerPack || 50}</span></div>
-                                    <input type="range" min="1" max="200" step="1" value={cfg.maxItemsPerPack || 50} onChange={(e) => setCfg({ maxItemsPerPack: parseInt(e.target.value) })} className="w-full slider-thumb" />
-                                </div>
-                                <div className="flex flex-col gap-1 text-xs">
-                                    <div className="flex justify-between"><label className="text-gray-400">Prefix Group Depth</label><span>{cfg.groupDepth || 2}</span></div>
-                                    <input type="range" min="1" max="6" step="1" value={cfg.groupDepth || 2} onChange={(e) => setCfg({ groupDepth: parseInt(e.target.value) })} className="w-full slider-thumb" />
-                                </div>
-                            </div>
-                        </div>
-                        <div className="space-y-8">{libVM.sets.map(set => (
-                            <div key={set.id} className="bg-[#1a1a1a] p-4 rounded-xl border border-gray-800">
-                                <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
-                                    <div className="min-w-0">
-                                        <EditableSetName set={set} libVM={libVM} />
-                                        <div className="text-[10px] text-gray-500 font-mono mt-1 truncate">
-                                            {`${getExportStemPreview(set.name)}_01_x<res>.png`}
+
+                        {selectedSet && (
+                            <div className="space-y-6">
+                                <div className="bg-[#1a1a1a] p-4 rounded-xl border border-gray-800">
+                                    <div className="flex justify-between items-start gap-4 mb-4 border-b border-gray-700 pb-3">
+                                        <div className="min-w-0">
+                                            <EditableSetName set={selectedSet} libVM={libVM} />
+                                            <div className="text-[10px] text-gray-500 font-mono mt-1 truncate">
+                                                {`${getExportStemPreview(selectedSet.name)}_01_x<res>.png`}
+                                            </div>
+                                            <div className="text-[10px] text-gray-500 font-mono mt-1">
+                                                {selectedSet.items.length} items | fail route: {libVM.getSetNameById(selectedSet.failTargetSetId)}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={() => libVM.deleteSet(selectedSet)} disabled={libVM.exportingSetId !== null || !!selectedSet.system} className={`text-[10px] px-3 py-1.5 rounded font-bold transition-colors ${libVM.exportingSetId !== null || !!selectedSet.system ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-200'}`}>
+                                                DELETE SET
+                                            </button>
+                                            <button onClick={() => libVM.exportSet(selectedSet)} disabled={libVM.exportingSetId !== null || selectedSet.items.length === 0} className={`text-[10px] px-3 py-1.5 rounded font-bold transition-colors ${libVM.exportingSetId === selectedSet.id ? 'bg-gray-600 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}>
+                                                {libVM.exportingSetId === selectedSet.id ? 'PACKING...' : '⬇ DOWNLOAD SET'}
+                                            </button>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                        <button onClick={() => libVM.deleteSet(set)} disabled={libVM.exportingSetId !== null} className={`text-[10px] px-3 py-1.5 rounded font-bold transition-colors ${libVM.exportingSetId !== null ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-200'}`}>
-                                            DELETE SET
-                                        </button>
-                                        <button onClick={() => libVM.exportSet(set)} disabled={libVM.exportingSetId !== null} className={`text-[10px] px-3 py-1.5 rounded font-bold transition-colors ${libVM.exportingSetId === set.id ? 'bg-gray-600 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}>
-                                            {libVM.exportingSetId === set.id ? 'PACKING...' : '⬇ DOWNLOAD FULL SET'}
-                                        </button>
+
+                                    {(libVM.exportingSetId === selectedSet.id && libVM.exportPhase) && (
+                                        <div className="text-[10px] text-blue-300 mb-3 font-mono">{libVM.exportPhase}</div>
+                                    )}
+                                    {(libVM.exportingSetId === null && libVM.exportError) && (
+                                        <div className="text-[10px] text-red-400 mb-3 font-mono">{libVM.exportError}</div>
+                                    )}
+
+                                    <div className="grid grid-cols-3 gap-3 text-xs">
+                                        <div className="flex flex-col gap-1">
+                                            <label className="text-gray-400">Sort By</label>
+                                            <select value={cfg.sortBy || 'none'} onChange={(e) => setCfg({ sortBy: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
+                                                <option value="none">None</option>
+                                                <option value="name">Name</option>
+                                                <option value="density">Alpha Density</option>
+                                                <option value="simplicity">Simplicity</option>
+                                                <option value="circularity">Circularity</option>
+                                                <option value="squareness">Squareness</option>
+                                            </select>
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                            <label className="text-gray-400">Direction</label>
+                                            <select value={cfg.sortDir || 'asc'} onChange={(e) => setCfg({ sortDir: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
+                                                <option value="asc">Ascending</option>
+                                                <option value="desc">Descending</option>
+                                            </select>
+                                        </div>
+                                        <div className="flex flex-col gap-1 text-xs">
+                                            <div className="flex justify-between"><label className="text-gray-400">Max Items Per Pack</label><span>{cfg.maxItemsPerPack || 50}</span></div>
+                                            <input type="range" min="1" max="200" step="1" value={cfg.maxItemsPerPack || 50} onChange={(e) => setCfg({ maxItemsPerPack: parseInt(e.target.value, 10) })} className="w-full slider-thumb" />
+                                        </div>
                                     </div>
                                 </div>
-                                {(libVM.exportingSetId === set.id && libVM.exportPhase) && (
-                                    <div className="text-[10px] text-blue-300 mb-3 font-mono">{libVM.exportPhase}</div>
-                                )}
-                                {(libVM.exportingSetId === null && libVM.exportError) && (
-                                    <div className="text-[10px] text-red-400 mb-3 font-mono">{libVM.exportError}</div>
-                                )}
-                                <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }}>
-	                                    {set.items.map((it, idx) => <VirtualizedTextureItem key={it.id} item={it} displayName={getSetItemPreviewName(set.name, idx)} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} maskViewMode={uiVM?.maskViewMode} dragEnabled={reorderEnabled} onReorder={libVM.reorderByDrag} onSendToFront={reorderEnabled ? libVM.sendToFront : null} onSendToBack={reorderEnabled ? libVM.sendToBack : null} />)}
-	                                </div>
-	                            </div>
-	                        ))}</div>
+
+                                <SetQualityPanel setRecord={selectedSet} libVM={libVM} />
+
+                                <div className="bg-[#1a1a1a] p-4 rounded-xl border border-gray-800">
+                                    <div className="text-[11px] font-bold text-gray-300 mb-3 uppercase tracking-wide">Set Contents</div>
+                                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }}>
+                                        {selectedSet.items.map((it, idx) => (
+                                            <VirtualizedTextureItem
+                                                key={it.id}
+                                                item={it}
+                                                displayName={getSetItemPreviewName(selectedSet.name, idx)}
+                                                engine={previewEngine}
+                                                onClick={libVM.onLoad}
+                                                onDelete={() => libVM.onDelete(it.id)}
+                                                flipFrames={16}
+                                                flipbookConfig={flipbookVM?.config}
+                                                autoAnimate={uiVM?.autoAnimateFrames}
+                                                maskViewMode={uiVM?.maskViewMode}
+                                                dragEnabled={reorderEnabled}
+                                                onReorder={libVM.reorderByDrag}
+                                                onSendToFront={reorderEnabled ? libVM.sendToFront : null}
+                                                onSendToBack={reorderEnabled ? libVM.sendToBack : null}
+                                            />
+                                        ))}
+                                    </div>
+                                    {selectedSet.items.length === 0 && <div className="text-xs text-gray-500 font-mono">This set is empty.</div>}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             );

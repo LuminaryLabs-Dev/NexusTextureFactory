@@ -1,11 +1,11 @@
-name: Deploy Triceratops to GitHub Pages
+name: Deploy Spinosaurus to GitHub Pages
 
 on:
   push:
     branches: ["build"]
     paths:
-      - "NexusTextureFactory-Triceratops/**"
-      - ".github/workflows/pages-triceratops.yml"
+      - "NexusTextureFactory-Spinosaurus/**"
+      - ".github/workflows/pages-spinosaurus.yml"
   workflow_dispatch:
 
 permissions:
@@ -29,14 +29,14 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: "NexusTextureFactory-Triceratops/package-lock.json"
+          cache-dependency-path: "NexusTextureFactory-Spinosaurus/package-lock.json"
 
       - name: Install
-        working-directory: NexusTextureFactory-Triceratops
+        working-directory: NexusTextureFactory-Spinosaurus
         run: npm ci
 
       - name: Build
-        working-directory: NexusTextureFactory-Triceratops
+        working-directory: NexusTextureFactory-Spinosaurus
         run: npm run build
 
       - name: Setup Pages
@@ -45,7 +45,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: NexusTextureFactory-Triceratops/dist
+          path: NexusTextureFactory-Spinosaurus/dist
 
   deploy:
     needs: build

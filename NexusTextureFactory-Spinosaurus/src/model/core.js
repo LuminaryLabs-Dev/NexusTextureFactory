@@ -111,6 +111,14 @@ return Math.max(0, Math.min(1, 1 - d * 2.2));`;
         const META_KEY_UI_PREFS = 'alphacarve-meta-ui-prefs-v1';
         const META_KEY_PACK_CONFIG = 'alphacarve-meta-pack-config-v1';
         const META_KEY_FLIPBOOK_CONFIG = 'alphacarve-meta-flipbook-config-v1';
+        const V3_WORKSPACE_STORAGE_KEY = 'spinosaurus-v3-workspace';
+        const PRIMARY_SET_ID = 'set-volume-1';
+        const REJECTS_SET_ID = 'set-rejects';
+        const DEFAULT_SET_EVALUATION_STAGE = 'intake';
+        const SET_EVALUATION_STAGES = [
+            { id: 'intake', name: 'Intake / Acceptance' },
+            { id: 'disabled', name: 'Disabled' }
+        ];
 
         const getDefaultBlendForCategory = (cat) => {
             if (cat === 'GEN') return 0;
