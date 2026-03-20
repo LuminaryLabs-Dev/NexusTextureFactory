@@ -7,31 +7,53 @@
             const [previewUrls, setPreviewUrls] = useState([]); const [finalPreviewUrl, setFinalPreviewUrl] = useState(null);
 	            const [customOperations, setCustomOperations] = useState([]);
             const [filterModules, setFilterModules] = useState(createDefaultFilterModules());
-            const [qualityFilters, setQualityFilters] = useState({
+            const createDefaultQualityFilters = useCallback(() => ({
                 alpha: { enabled: true, min: 0.05, max: 0.75, expanded: true },
                 similarity: { enabled: false, maxSimilarity: 0.9, historySize: 200, expanded: false },
                 shape: { enabled: false, minCircularity: 0.2, maxCircularity: 1.0, minSquareness: 0.2, maxSquareness: 1.0, expanded: false },
                 temporalChange: { enabled: true, minChange: 0.04, maxChange: 0.95, maxJitter: 0.2, expanded: true },
                 simplicity: { enabled: false, min: 0.1, max: 0.9, expanded: false }
-            });
-            const [packConfig, setPackConfig] = useState({
-                groupBy: 'volume_fill',
-                groupDepth: 2,
-                maxItemsPerPack: 50,
-                sortBy: 'none',
-                sortDir: 'asc',
-                setNameOverrides: {}
-            });
+            }), []);
+            const mergeQualityFilters = useCallback((value) => {
+                const defaults = createDefaultQualityFilters();
+                const parsed = value && typeof value === 'object' ? value : {};
+                return {
+                    ...defaults,
+                    ...parsed,
+                    alpha: { ...defaults.alpha, ...(parsed.alpha || {}) },
+                    similarity: { ...defaults.similarity, ...(parsed.similarity || {}) },
+                    shape: { ...defaults.shape, ...(parsed.shape || {}) },
+                    temporalChange: { ...defaults.temporalChange, ...(parsed.temporalChange || {}) },
+                    simplicity: { ...defaults.simplicity, ...(parsed.simplicity || {}) }
+                };
+            }, [createDefaultQualityFilters]);
+            const [qualityFilters, setQualityFilters] = useState(() => createDefaultQualityFilters());
+            const normalizePackConfig = useCallback((value) => {
+                const parsed = value && typeof value === 'object' ? value : {};
+                return {
+                    groupBy: 'set',
+                    groupDepth: 1,
+                    maxItemsPerPack: Math.max(1, Math.min(200, parseInt(parsed.maxItemsPerPack || 50, 10) || 50)),
+                    sortBy: ['none', 'name', 'density', 'simplicity', 'circularity', 'squareness'].includes(parsed.sortBy) ? parsed.sortBy : 'none',
+                    sortDir: parsed.sortDir === 'desc' ? 'desc' : 'asc',
+                    setNameOverrides: {}
+                };
+            }, []);
+            const [packConfig, setPackConfig] = useState(() => normalizePackConfig({}));
             const [flipbookConfig, setFlipbookConfig] = useState(createDefaultFlipbookConfig());
 	            const [dreamParams, setDreamParams] = useState({ overdrive: 0, generationWorkers: 5, packagingWorkers: 5, refineCycles: 1, minDensity: 0.15, maxDensity: 0.75, minSimplicity: 0.1, maxSimplicity: 0.9, varianceStrictness: 0.1, randStrength: 0.5, flipFrames: 16, prompt: "", minComplexity: 5, maxComplexity: 10, resultFillMode: 'slide' });
 
 		            const [isDreaming, setIsDreaming] = useState(false); const [dreamState, setDreamState] = useState({ results: [], rejectedIds: [], phase: '', rejectLabel: '', pendingAccepted: 0, pendingAttempts: 0, pendingRejected: 0, pendingBackfill: 0, activeGenWorkers: 0, activeBackfillWorkers: 0, stageRejects: { alpha: 0, simplicity: 0, shape: 0, similarity: 0, temporal: 0, other: 0 } });
             const [savedLibrary, setSavedLibrary] = useState([]); const [exportingSetId, setExportingSetId] = useState(null); const [exportPhase, setExportPhase] = useState(''); const [exportError, setExportError] = useState('');
+            const [savedSets, setSavedSets] = useState([]);
+            const [activeTargetSetId, setActiveTargetSetId] = useState(PRIMARY_SET_ID);
+            const [selectedSetId, setSelectedSetId] = useState(PRIMARY_SET_ID);
             const [deleteHistory, setDeleteHistory] = useState([]);
 	            const eR = useRef(null); const bER = useRef(null);
 	            const generationEnginesRef = useRef([]);
 	            const hasHydratedMetaRef = useRef(false);
 	            const savedLibraryRef = useRef(savedLibrary);
+	            const savedSetsRef = useRef(savedSets);
 	            const dreamResultsRef = useRef(dreamState.results);
 	            const deleteHistoryRef = useRef(deleteHistory);
 	            const persistTimerRef = useRef(null);
@@ -43,6 +65,88 @@
                 if (!Number.isFinite(parsed)) return DEFAULT_SET_GRID_COLUMNS;
                 return Math.max(1, Math.min(12, parsed));
             };
+            const areSetRecordsEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+            const buildSetRecord = useCallback((name, options = {}) => ({
+                id: options.id || `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                name: String(name || 'Untitled Set').trim() || 'Untitled Set',
+                itemIds: Array.isArray(options.itemIds) ? [...options.itemIds] : [],
+                qualityFilters: mergeQualityFilters(options.qualityFilters),
+                evaluationStage: options.evaluationStage === 'disabled' ? 'disabled' : DEFAULT_SET_EVALUATION_STAGE,
+                failTargetSetId: options.failTargetSetId || null,
+                system: !!options.system
+            }), [mergeQualityFilters]);
+            const normalizeSavedSets = useCallback((records, libraryItems = savedLibraryRef.current || []) => {
+                const existingIds = new Set((libraryItems || []).map((item) => item.id));
+                const seenSetIds = new Set();
+                const claimedItemIds = new Set();
+                const next = [];
+                const appendSet = (candidate) => {
+                    const nextId = candidate?.id || `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                    if (seenSetIds.has(nextId)) return;
+                    seenSetIds.add(nextId);
+                    const merged = buildSetRecord(candidate?.name || 'Untitled Set', {
+                        ...candidate,
+                        id: nextId
+                    });
+                    const nextItemIds = [];
+                    (merged.itemIds || []).forEach((itemId) => {
+                        if (!existingIds.has(itemId) || claimedItemIds.has(itemId)) return;
+                        claimedItemIds.add(itemId);
+                        nextItemIds.push(itemId);
+                    });
+                    next.push({
+                        ...merged,
+                        itemIds: nextItemIds,
+                        system: merged.system || nextId === PRIMARY_SET_ID || nextId === REJECTS_SET_ID
+                    });
+                };
+
+                if (Array.isArray(records)) records.forEach((record) => appendSet(record));
+                if (!seenSetIds.has(PRIMARY_SET_ID)) {
+                    appendSet({
+                        id: PRIMARY_SET_ID,
+                        name: 'Volume 1',
+                        qualityFilters,
+                        evaluationStage: DEFAULT_SET_EVALUATION_STAGE,
+                        failTargetSetId: REJECTS_SET_ID,
+                        system: true
+                    });
+                }
+                if (!seenSetIds.has(REJECTS_SET_ID)) {
+                    appendSet({
+                        id: REJECTS_SET_ID,
+                        name: 'Rejects',
+                        qualityFilters,
+                        evaluationStage: 'disabled',
+                        failTargetSetId: null,
+                        system: true
+                    });
+                }
+
+                const unassignedIds = [...existingIds].filter((itemId) => !claimedItemIds.has(itemId));
+                if (unassignedIds.length > 0) {
+                    const primaryIndex = next.findIndex((set) => set.id === PRIMARY_SET_ID);
+                    if (primaryIndex >= 0) {
+                        next[primaryIndex] = {
+                            ...next[primaryIndex],
+                            itemIds: [...next[primaryIndex].itemIds, ...unassignedIds]
+                        };
+                    }
+                }
+
+                const validSetIds = new Set(next.map((set) => set.id));
+                return next.map((set) => {
+                    const isRejects = set.id === REJECTS_SET_ID;
+                    const failTargetValid = !!set.failTargetSetId && set.failTargetSetId !== set.id && validSetIds.has(set.failTargetSetId);
+                    return {
+                        ...set,
+                        qualityFilters: mergeQualityFilters(set.qualityFilters),
+                        evaluationStage: isRejects ? 'disabled' : (set.evaluationStage === 'disabled' ? 'disabled' : DEFAULT_SET_EVALUATION_STAGE),
+                        failTargetSetId: isRejects ? null : (failTargetValid ? set.failTargetSetId : REJECTS_SET_ID),
+                        system: set.system || isRejects || set.id === PRIMARY_SET_ID
+                    };
+                });
+            }, [buildSetRecord, mergeQualityFilters, qualityFilters]);
 
 	            useEffect(() => { eR.current = new TextureEngine(256, 256); bER.current = new TextureEngine(256, 256); }, []);
 	            useEffect(() => {
@@ -67,6 +171,7 @@
                 });
             }, [steps, maskViewMode]);
 	            useEffect(() => { savedLibraryRef.current = savedLibrary; }, [savedLibrary]);
+	            useEffect(() => { savedSetsRef.current = savedSets; }, [savedSets]);
 	            useEffect(() => { dreamResultsRef.current = dreamState.results; }, [dreamState.results]);
 	            useEffect(() => { deleteHistoryRef.current = deleteHistory; }, [deleteHistory]);
             useEffect(() => () => {
@@ -144,88 +249,68 @@
                 }
 	            useEffect(() => {
 	                try {
-	                    const rawLibrary = localStorage.getItem(META_KEY_LIBRARY);
-	                    if (rawLibrary) {
-	                        const parsed = JSON.parse(rawLibrary);
-	                        if (Array.isArray(parsed)) setSavedLibrary(parsed.map((item) => ({ ...item, config: hydrateConfigDefaults(item?.config) })));
-	                    }
-	                    const rawCustomOps = localStorage.getItem(META_KEY_CUSTOM_OPS);
-	                    if (rawCustomOps) {
-	                        const parsed = JSON.parse(rawCustomOps);
-	                        if (Array.isArray(parsed)) setCustomOperations(parsed);
-	                    }
-	                    const rawFilterModules = localStorage.getItem(META_KEY_FILTER_MODULES);
-	                    if (rawFilterModules) {
-	                        const parsed = JSON.parse(rawFilterModules);
-	                        if (Array.isArray(parsed)) {
-                                const defaultsById = new Map(createDefaultFilterModules().map((item) => [item.id, item]));
-                                setFilterModules(parsed.map((item) => {
-                                    const base = defaultsById.get(item.id) || createDefaultFilterModules().find((candidate) => candidate.key === item.key) || item;
-                                    return {
-                                        ...base,
-                                        ...item,
-                                        params: { ...(base.params || {}), ...(item.params || {}) },
-                                        universal: { ...(base.universal || {}), ...(item.universal || {}) }
-                                    };
-                                }));
-                            }
-	                    }
-                    const rawQuality = localStorage.getItem(META_KEY_QUALITY_FILTERS);
-                    if (rawQuality) {
-                        const parsed = JSON.parse(rawQuality);
-                        if (parsed && typeof parsed === 'object') {
-                            setQualityFilters(prev => ({
-                                ...prev,
-                                ...parsed,
-                                alpha: { ...prev.alpha, ...(parsed.alpha || {}) },
-                                similarity: { ...prev.similarity, ...(parsed.similarity || {}) },
-                                shape: { ...prev.shape, ...(parsed.shape || {}) },
-                                temporalChange: { ...prev.temporalChange, ...(parsed.temporalChange || {}) },
-                                simplicity: { ...prev.simplicity, ...(parsed.simplicity || {}) }
-                            }));
-                        }
-                    }
-                    const rawDreamParams = localStorage.getItem(META_KEY_DREAM_PARAMS);
-                    if (rawDreamParams) {
-                        const parsed = JSON.parse(rawDreamParams);
-                        if (parsed && typeof parsed === 'object') {
-                            const nextMinComplexity = Math.max(1, Math.min(20, parseInt(parsed.minComplexity ?? 5)));
-                            const nextMaxComplexity = Math.max(nextMinComplexity, Math.min(20, parseInt(parsed.maxComplexity ?? 10)));
-                            const nextOverdrive = Math.max(0, Math.min(1, Number(parsed.overdrive ?? 0)));
-                            const nextResultFillMode = parsed.resultFillMode === 'slot' ? 'slot' : 'slide';
-                            setDreamParams(prev => ({
-                                ...prev,
-                                ...parsed,
-                                overdrive: nextOverdrive,
-                                minComplexity: nextMinComplexity,
-                                maxComplexity: nextMaxComplexity,
-                                resultFillMode: nextResultFillMode
-                            }));
-                        }
-                    }
-	                    const rawUiPrefs = localStorage.getItem(META_KEY_UI_PREFS);
-	                    if (rawUiPrefs) {
-	                        const parsed = JSON.parse(rawUiPrefs);
+	                    const rawWorkspace = localStorage.getItem(V3_WORKSPACE_STORAGE_KEY);
+	                    if (rawWorkspace) {
+	                        const parsed = JSON.parse(rawWorkspace);
 	                        if (parsed && typeof parsed === 'object') {
-	                            if (typeof parsed.autoAnimateFrames === 'boolean') setAutoAnimateFrames(parsed.autoAnimateFrames);
-                            if (typeof parsed.useWorkbenchSeed === 'boolean') setUseWorkbenchSeed(parsed.useWorkbenchSeed);
-                            if (parsed.maskViewMode === 'bw' || parsed.maskViewMode === 'transparent') setMaskViewMode(parsed.maskViewMode);
-                            setGridColumns(clampSetGridColumns(parsed.gridColumns ?? DEFAULT_SET_GRID_COLUMNS));
-	                        }
-	                    }
-                    const rawPackConfig = localStorage.getItem(META_KEY_PACK_CONFIG);
-                    if (rawPackConfig) {
-                        const parsed = JSON.parse(rawPackConfig);
-                        if (parsed && typeof parsed === 'object') setPackConfig(prev => ({ ...prev, ...parsed }));
+                                const hydratedLibrary = Array.isArray(parsed.library)
+                                    ? parsed.library.map((item) => ({ ...item, config: hydrateConfigDefaults(item?.config) }))
+                                    : [];
+	                            setSavedLibrary(hydratedLibrary);
+                                setSavedSets(normalizeSavedSets(parsed.sets, hydratedLibrary));
+                                if (Array.isArray(parsed.customOperations)) setCustomOperations(parsed.customOperations);
+                                if (Array.isArray(parsed.filterModules)) {
+                                    const defaultsById = new Map(createDefaultFilterModules().map((item) => [item.id, item]));
+                                    setFilterModules(parsed.filterModules.map((item) => {
+                                        const base = defaultsById.get(item.id) || createDefaultFilterModules().find((candidate) => candidate.key === item.key) || item;
+                                        return {
+                                            ...base,
+                                            ...item,
+                                            params: { ...(base.params || {}), ...(item.params || {}) },
+                                            universal: { ...(base.universal || {}), ...(item.universal || {}) }
+                                        };
+                                    }));
+                                }
+                                if (parsed.defaultQualityFilters && typeof parsed.defaultQualityFilters === 'object') {
+                                    setQualityFilters(mergeQualityFilters(parsed.defaultQualityFilters));
+                                }
+                                if (parsed.dreamParams && typeof parsed.dreamParams === 'object') {
+                                    const nextMinComplexity = Math.max(1, Math.min(20, parseInt(parsed.dreamParams.minComplexity ?? 5, 10)));
+                                    const nextMaxComplexity = Math.max(nextMinComplexity, Math.min(20, parseInt(parsed.dreamParams.maxComplexity ?? 10, 10)));
+                                    const nextOverdrive = Math.max(0, Math.min(1, Number(parsed.dreamParams.overdrive ?? 0)));
+                                    const nextResultFillMode = parsed.dreamParams.resultFillMode === 'slot' ? 'slot' : 'slide';
+                                    setDreamParams(prev => ({
+                                        ...prev,
+                                        ...parsed.dreamParams,
+                                        overdrive: nextOverdrive,
+                                        minComplexity: nextMinComplexity,
+                                        maxComplexity: nextMaxComplexity,
+                                        resultFillMode: nextResultFillMode
+                                    }));
+                                }
+                                if (parsed.uiPrefs && typeof parsed.uiPrefs === 'object') {
+                                    if (typeof parsed.uiPrefs.autoAnimateFrames === 'boolean') setAutoAnimateFrames(parsed.uiPrefs.autoAnimateFrames);
+                                    if (typeof parsed.uiPrefs.useWorkbenchSeed === 'boolean') setUseWorkbenchSeed(parsed.uiPrefs.useWorkbenchSeed);
+                                    if (parsed.uiPrefs.maskViewMode === 'bw' || parsed.uiPrefs.maskViewMode === 'transparent') setMaskViewMode(parsed.uiPrefs.maskViewMode);
+                                    setGridColumns(clampSetGridColumns(parsed.uiPrefs.gridColumns ?? DEFAULT_SET_GRID_COLUMNS));
+                                    if (typeof parsed.uiPrefs.activeTargetSetId === 'string') setActiveTargetSetId(parsed.uiPrefs.activeTargetSetId);
+                                    if (typeof parsed.uiPrefs.selectedSetId === 'string') setSelectedSetId(parsed.uiPrefs.selectedSetId);
+                                }
+                                if (parsed.packConfig && typeof parsed.packConfig === 'object') {
+                                    setPackConfig(normalizePackConfig(parsed.packConfig));
+                                }
+                                if (parsed.flipbookConfig) {
+                                    setFlipbookConfig(mergeFlipbookConfig(parsed.flipbookConfig));
+                                }
+                            }
+	                    } else {
+                            setSavedSets(normalizeSavedSets([], []));
+                        }
+                } catch (_) {
+                        setSavedSets(normalizeSavedSets([], []));
                     }
-                    const rawFlipbookConfig = localStorage.getItem(META_KEY_FLIPBOOK_CONFIG);
-                    if (rawFlipbookConfig) {
-                        const parsed = JSON.parse(rawFlipbookConfig);
-                        setFlipbookConfig(mergeFlipbookConfig(parsed));
-                    }
-                } catch (_) { }
                 hasHydratedMetaRef.current = true;
-            }, [mergeFlipbookConfig]);
+            }, [mergeFlipbookConfig, mergeQualityFilters, normalizePackConfig, normalizeSavedSets]);
             useEffect(() => {
                 const activeIds = new Set(savedLibrary.map((item) => item.id));
                 hydratedLibraryUrlsRef.current.forEach((url, id) => {
@@ -234,6 +319,12 @@
                     hydratedLibraryUrlsRef.current.delete(id);
                 });
             }, [savedLibrary]);
+            useEffect(() => {
+                setSavedSets((prev) => {
+                    const next = normalizeSavedSets(prev, savedLibrary);
+                    return areSetRecordsEqual(prev, next) ? prev : next;
+                });
+            }, [savedLibrary, normalizeSavedSets]);
             const normalizeExportStem = useCallback((value) => {
                 const raw = String(value || '').trim();
                 const tokens = raw.match(/[A-Za-z0-9]+/g) || [];
@@ -241,8 +332,30 @@
                 const stem = tokens.map((token) => token.charAt(0).toUpperCase() + token.slice(1)).join('');
                 return stem || 'TexturePack';
             }, []);
-            const OUTPUT_EXPORT_MODES = ['transparent', 'bw'];
-            const getOutputFileSuffix = (mode) => mode === 'bw' ? 'BW' : 'Transparent';
+            const OUTPUT_EXPORT_MODES = ['transparent'];
+            const getOutputFileSuffix = () => '';
+            const buildOutputFileName = (stem, mode) => {
+                const suffix = getOutputFileSuffix(mode);
+                return suffix ? `${stem}_${suffix}.png` : `${stem}.png`;
+            };
+            const sortItemsForPack = useCallback((items, config = packConfig) => {
+                if (!Array.isArray(items)) return [];
+                if ((config?.sortBy || 'none') === 'none') return [...items];
+                const next = [...items];
+                next.sort((a, b) => {
+                    let av = a?.name;
+                    let bv = b?.name;
+                    if (config.sortBy === 'density') { av = a?.density || 0; bv = b?.density || 0; }
+                    else if (config.sortBy === 'simplicity') { av = a?.sScore || 0; bv = b?.sScore || 0; }
+                    else if (config.sortBy === 'circularity') { av = a?.circularity || 0; bv = b?.circularity || 0; }
+                    else if (config.sortBy === 'squareness') { av = a?.squareness || 0; bv = b?.squareness || 0; }
+                    let result = 0;
+                    if (typeof av === 'number' && typeof bv === 'number') result = av - bv;
+                    else result = String(av || '').localeCompare(String(bv || ''));
+                    return config.sortDir === 'desc' ? -result : result;
+                });
+                return next;
+            }, [packConfig]);
             useEffect(() => {
                 const targets = savedLibrary.filter((item) => item?.id && item?.storageKey && !item?.url);
                 if (targets.length === 0) return;
@@ -298,14 +411,26 @@
 	                persistTimerRef.current = setTimeout(() => {
 	                    persistTimerRef.current = null;
 	                    try {
-	                        localStorage.setItem(META_KEY_LIBRARY, JSON.stringify(savedLibrary.map((item) => ({ ...item, url: null }))));
-	                        localStorage.setItem(META_KEY_CUSTOM_OPS, JSON.stringify(customOperations));
-                        localStorage.setItem(META_KEY_FILTER_MODULES, JSON.stringify(filterModules));
-                        localStorage.setItem(META_KEY_QUALITY_FILTERS, JSON.stringify(qualityFilters));
-                        localStorage.setItem(META_KEY_DREAM_PARAMS, JSON.stringify(dreamParams));
-	                        localStorage.setItem(META_KEY_UI_PREFS, JSON.stringify({ autoAnimateFrames, useWorkbenchSeed, maskViewMode, gridColumns }));
-                        localStorage.setItem(META_KEY_PACK_CONFIG, JSON.stringify(packConfig));
-                        localStorage.setItem(META_KEY_FLIPBOOK_CONFIG, JSON.stringify(flipbookConfig));
+                            const normalizedSets = normalizeSavedSets(savedSets, savedLibrary);
+	                        localStorage.setItem(V3_WORKSPACE_STORAGE_KEY, JSON.stringify({
+                                version: 3,
+                                library: savedLibrary.map((item) => ({ ...item, url: null })),
+                                sets: normalizedSets,
+                                customOperations,
+                                filterModules,
+                                defaultQualityFilters: qualityFilters,
+                                dreamParams,
+                                uiPrefs: {
+                                    autoAnimateFrames,
+                                    useWorkbenchSeed,
+                                    maskViewMode,
+                                    gridColumns,
+                                    activeTargetSetId,
+                                    selectedSetId
+                                },
+                                packConfig,
+                                flipbookConfig
+                            }));
                     } catch (_) { }
                 }, 220);
 	                return () => {
@@ -314,99 +439,36 @@
 	                        persistTimerRef.current = null;
 	                    }
 	                };
-            }, [savedLibrary, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, useWorkbenchSeed, maskViewMode, gridColumns, packConfig, flipbookConfig]);
+            }, [savedLibrary, savedSets, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, useWorkbenchSeed, maskViewMode, gridColumns, packConfig, flipbookConfig, activeTargetSetId, selectedSetId, normalizeSavedSets]);
 
             const sets = useMemo(() => {
-                const normalizeName = (item) => String(item?.name || 'Misc');
-                const getGroupKey = (item) => {
-                    if (packConfig.groupBy === 'volume_fill') return '__all__';
-                    const name = normalizeName(item);
-                    const parts = name.split('_').filter(Boolean);
-                    if (packConfig.groupBy === 'full') return name || 'Misc';
-                    if (packConfig.groupBy === 'shape_variant') return parts.slice(0, 2).join('_') || parts[0] || 'Misc';
-                    const depth = Math.max(1, Math.min(parseInt(packConfig.groupDepth || 2), Math.max(1, parts.length - 1)));
-                    return parts.slice(0, depth).join('_') || 'Misc';
-                };
-                const cmp = (a, b) => {
-                    if (packConfig.sortBy === 'none') return 0;
-                    let av = a.name;
-                    let bv = b.name;
-                    if (packConfig.sortBy === 'density') { av = a.density || 0; bv = b.density || 0; }
-                    else if (packConfig.sortBy === 'simplicity') { av = a.sScore || 0; bv = b.sScore || 0; }
-                    else if (packConfig.sortBy === 'circularity') { av = a.circularity || 0; bv = b.circularity || 0; }
-                    else if (packConfig.sortBy === 'squareness') { av = a.squareness || 0; bv = b.squareness || 0; }
-                    let res = 0;
-                    if (typeof av === 'number' && typeof bv === 'number') res = av - bv;
-                    else res = String(av).localeCompare(String(bv));
-                    return packConfig.sortDir === 'desc' ? -res : res;
-                };
-                const ts = {};
-                savedLibrary.forEach(it => {
-                    const key = getGroupKey(it);
-                    if (!ts[key]) ts[key] = [];
-                    ts[key].push(it);
-                });
-                const final = [];
-                const keys = Object.keys(ts).sort((a, b) => a.localeCompare(b));
-                const maxItemsPerPack = Math.max(1, parseInt(packConfig.maxItemsPerPack || 50));
-                keys.forEach(k => {
-                    const its = packConfig.sortBy === 'none' ? [...ts[k]] : [...ts[k]].sort(cmp);
-                    if (its.length <= maxItemsPerPack) {
-                        const setId = k;
-                        const singleName = packConfig.groupBy === 'volume_fill'
-                            ? (packConfig.setNameOverrides?.[setId] || 'Volume 1')
-                            : k;
-                        final.push({ id: setId, baseKey: k, name: singleName, items: its });
-                    }
-                    else {
-                        for (let i = 0; i < its.length; i += maxItemsPerPack) {
-                            const vol = Math.floor(i / maxItemsPerPack) + 1;
-                            const setId = `${k}${i}`;
-                            const name = packConfig.groupBy === 'volume_fill'
-                                ? (packConfig.setNameOverrides?.[setId] || `Volume ${vol}`)
-                                : (vol === 1 ? k : `${k} Vol ${vol}`);
-                            final.push({ id: setId, baseKey: k, name, items: its.slice(i, i + maxItemsPerPack) });
-                        }
-                    }
-                });
-                return final;
-            }, [savedLibrary, packConfig]);
-
-            const reorganizePacks = () => {
-                setSavedLibrary(prev => {
-                    if ((packConfig.sortBy || 'none') === 'none') return prev;
-                    const normalizeName = (item) => String(item?.name || 'Misc');
-                    const getGroupKey = (item) => {
-                        if (packConfig.groupBy === 'volume_fill') return '__all__';
-                        const name = normalizeName(item);
-                        const parts = name.split('_').filter(Boolean);
-                        if (packConfig.groupBy === 'full') return name || 'Misc';
-                        if (packConfig.groupBy === 'shape_variant') return parts.slice(0, 2).join('_') || parts[0] || 'Misc';
-                        const depth = Math.max(1, Math.min(parseInt(packConfig.groupDepth || 2), Math.max(1, parts.length - 1)));
-                        return parts.slice(0, depth).join('_') || 'Misc';
-                    };
-                    const cmp = (a, b) => {
-                        if (packConfig.sortBy === 'none') return 0;
-                        let av = a.name;
-                        let bv = b.name;
-                        if (packConfig.sortBy === 'density') { av = a.density || 0; bv = b.density || 0; }
-                        else if (packConfig.sortBy === 'simplicity') { av = a.sScore || 0; bv = b.sScore || 0; }
-                        else if (packConfig.sortBy === 'circularity') { av = a.circularity || 0; bv = b.circularity || 0; }
-                        else if (packConfig.sortBy === 'squareness') { av = a.squareness || 0; bv = b.squareness || 0; }
-                        let res = 0;
-                        if (typeof av === 'number' && typeof bv === 'number') res = av - bv;
-                        else res = String(av).localeCompare(String(bv));
-                        return packConfig.sortDir === 'desc' ? -res : res;
-                    };
-                    return [...prev].sort((a, b) => {
-                        const ga = getGroupKey(a);
-                        const gb = getGroupKey(b);
-                        const gcmp = ga.localeCompare(gb);
-                        if (gcmp !== 0) return gcmp;
-                        return cmp(a, b);
-                    });
-                });
-            };
+                const libraryById = new Map(savedLibrary.map((item) => [item.id, item]));
+                return normalizeSavedSets(savedSets, savedLibrary).map((setRecord) => ({
+                    ...setRecord,
+                    items: sortItemsForPack(setRecord.itemIds.map((itemId) => libraryById.get(itemId)).filter(Boolean))
+                }));
+            }, [savedLibrary, savedSets, normalizeSavedSets, sortItemsForPack]);
+            const setMap = useMemo(() => new Map(sets.map((set) => [set.id, set])), [sets]);
+            const selectedSet = setMap.get(selectedSetId) || sets[0] || null;
+            const activeTargetSet = setMap.get(activeTargetSetId) || setMap.get(PRIMARY_SET_ID) || sets[0] || null;
+            const resolveFailTargetSetId = useCallback((setRecord, setRecords) => {
+                const fallbackId = setRecords.some((candidate) => candidate.id === REJECTS_SET_ID)
+                    ? REJECTS_SET_ID
+                    : (setRecords[0]?.id || null);
+                if (!setRecord?.failTargetSetId) return fallbackId;
+                if (setRecord.failTargetSetId === setRecord.id) return fallbackId;
+                return setRecords.some((candidate) => candidate.id === setRecord.failTargetSetId)
+                    ? setRecord.failTargetSetId
+                    : fallbackId;
+            }, []);
+            const getSetNameById = useCallback((setId, records = sets) => {
+                const match = records.find((record) => record.id === setId);
+                return match?.name || 'Unassigned';
+            }, [sets]);
+            const getItemSetId = useCallback((itemId, records = sets) => {
+                const match = records.find((record) => record.itemIds.includes(itemId));
+                return match?.id || null;
+            }, [sets]);
 
             const moveArrayItem = (arr, fromIndex, toIndex) => {
                 if (!Array.isArray(arr)) return arr;
@@ -457,79 +519,249 @@
                 return compactResultsByBottomFill(results, shouldRemove);
             };
 
-	            const reorderByDrag = (sourceId, targetId) => {
-	                const cfg = packConfig || {};
-	                const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
-	                if (!reorderEnabled) return;
-	                if (!sourceId || !targetId || sourceId === targetId) return;
+            useEffect(() => {
+                const validIds = new Set(sets.map((set) => set.id));
+                const fallbackId = validIds.has(PRIMARY_SET_ID) ? PRIMARY_SET_ID : (sets[0]?.id || null);
+                if (!fallbackId) return;
+                setSelectedSetId((prev) => validIds.has(prev) ? prev : fallbackId);
+                setActiveTargetSetId((prev) => validIds.has(prev) ? prev : fallbackId);
+            }, [sets]);
 
-                setSavedLibrary(prev => {
-                    const fromIndex = prev.findIndex(it => it.id === sourceId);
-                    const toIndex = prev.findIndex(it => it.id === targetId);
-                    if (fromIndex < 0 || toIndex < 0) return prev;
-                    return moveArrayItem(prev, fromIndex, toIndex);
+            const extractItemAnalysis = (item) => ({
+                density: Number(item?.density || 0),
+                sScore: Number(item?.sScore || 0),
+                circularity: Number(item?.circularity || 0),
+                squareness: Number(item?.squareness || 0),
+                changeScore: Number(item?.changeScore || 0),
+                jitterScore: Number(item?.jitterScore || 0),
+                hash: item?.hash || ''
+            });
+
+            const runStageAlphaAndSimplicityGate = (analysis, filters) => {
+                const alphaFilter = filters.alpha;
+                if (alphaFilter.enabled && (analysis.density < alphaFilter.min || analysis.density > alphaFilter.max)) return { pass: false, reason: 'alpha' };
+                const simplicityFilter = filters.simplicity;
+                if (simplicityFilter.enabled && (analysis.sScore < simplicityFilter.min || analysis.sScore > simplicityFilter.max)) return { pass: false, reason: 'simplicity' };
+                return { pass: true, reason: '' };
+            };
+
+            const runStageShapeGate = (analysis, filters) => {
+                const shapeFilter = filters.shape;
+                if (!shapeFilter.enabled) return { pass: true, reason: '' };
+                if (analysis.circularity < shapeFilter.minCircularity || analysis.circularity > shapeFilter.maxCircularity) return { pass: false, reason: 'shape' };
+                if (analysis.squareness < shapeFilter.minSquareness || analysis.squareness > shapeFilter.maxSquareness) return { pass: false, reason: 'shape' };
+                return { pass: true, reason: '' };
+            };
+
+            const runStageSimilarityGate = (analysis, recentHashes, filters) => {
+                const similarityFilter = filters.similarity;
+                if (!similarityFilter.enabled || !analysis.hash) return { pass: true, reason: '', similarity: 0 };
+                const bestSimilarity = getBestSimilarity(analysis.hash, recentHashes, similarityFilter.historySize);
+                if (bestSimilarity > similarityFilter.maxSimilarity) return { pass: false, reason: 'similarity', similarity: bestSimilarity };
+                return { pass: true, reason: '', similarity: bestSimilarity };
+            };
+
+            const runStageTemporalGate = (analysis, filters) => {
+                const temporalFilter = filters.temporalChange;
+                if (!temporalFilter.enabled) return { pass: true, reason: '' };
+                const changeScore = Number(analysis.changeScore || 0);
+                const jitterScore = Number(analysis.jitterScore || 0);
+                if (changeScore < temporalFilter.minChange || changeScore > temporalFilter.maxChange) return { pass: false, reason: 'temporal' };
+                if (jitterScore > temporalFilter.maxJitter) return { pass: false, reason: 'temporal' };
+                return { pass: true, reason: '' };
+            };
+
+            const assignItemsToSetWithRouting = useCallback((setRecords, entries, libraryItems) => {
+                const normalized = normalizeSavedSets(setRecords, libraryItems).map((setRecord) => ({
+                    ...setRecord,
+                    itemIds: [...setRecord.itemIds],
+                    qualityFilters: mergeQualityFilters(setRecord.qualityFilters)
+                }));
+                const stageCounts = createStageRejectCounters();
+                const itemAssignments = [];
+                const setById = new Map(normalized.map((setRecord) => [setRecord.id, setRecord]));
+                const libraryById = new Map((libraryItems || []).map((item) => [item.id, item]));
+                const setHashes = new Map(normalized.map((setRecord) => [
+                    setRecord.id,
+                    setRecord.itemIds.map((itemId) => libraryById.get(itemId)?.hash).filter(Boolean)
+                ]));
+                const appendToSet = (setId, itemId) => {
+                    const targetSet = setById.get(setId);
+                    const item = libraryById.get(itemId);
+                    if (!targetSet || !item) return;
+                    if (!targetSet.itemIds.includes(itemId)) targetSet.itemIds.push(itemId);
+                    if (item.hash) {
+                        const hashes = setHashes.get(setId) || [];
+                        hashes.push(item.hash);
+                        setHashes.set(setId, hashes);
+                    }
+                };
+                const removeFromAllSets = (itemId) => {
+                    normalized.forEach((setRecord) => {
+                        if (!setRecord.itemIds.includes(itemId)) return;
+                        setRecord.itemIds = setRecord.itemIds.filter((candidateId) => candidateId !== itemId);
+                    });
+                };
+
+                (entries || []).forEach((entry) => {
+                    const item = entry?.item;
+                    if (!item?.id) return;
+                    removeFromAllSets(item.id);
+                    const requestedTargetId = entry?.targetSetId;
+                    const targetSet = setById.get(requestedTargetId) || setById.get(PRIMARY_SET_ID) || normalized[0] || null;
+                    if (!targetSet) return;
+
+                    let finalSetId = targetSet.id;
+                    let reason = '';
+                    if (targetSet.evaluationStage !== 'disabled') {
+                        const filters = mergeQualityFilters(targetSet.qualityFilters);
+                        const analysis = extractItemAnalysis(item);
+                        const stageAlpha = runStageAlphaAndSimplicityGate(analysis, filters);
+                        const stageShape = runStageShapeGate(analysis, filters);
+                        const stageSimilarity = runStageSimilarityGate(analysis, setHashes.get(targetSet.id) || [], filters);
+                        const stageTemporal = runStageTemporalGate(analysis, filters);
+                        const firstFailure = [stageAlpha, stageShape, stageSimilarity, stageTemporal].find((stage) => !stage.pass);
+                        if (firstFailure) {
+                            reason = firstFailure.reason || 'other';
+                            countReject(stageCounts, reason);
+                            finalSetId = resolveFailTargetSetId(targetSet, normalized);
+                        }
+                    }
+
+                    appendToSet(finalSetId, item.id);
+                    itemAssignments.push({
+                        itemId: item.id,
+                        requestedSetId: targetSet.id,
+                        finalSetId,
+                        reason,
+                        routed: finalSetId !== targetSet.id
+                    });
                 });
 
-                setDreamState(prev => {
-                    const fromIndex = prev.results.findIndex(it => it.id === sourceId);
-                    const toIndex = prev.results.findIndex(it => it.id === targetId);
-	                    if (fromIndex < 0 || toIndex < 0) return prev;
-	                    return { ...prev, results: moveArrayItem(prev.results, fromIndex, toIndex) };
-	                });
-	            };
-            const moveLibraryItemToIndex = (itemId, toIndex) => {
-                const cfg = packConfig || {};
-                const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
-                if (!reorderEnabled || !itemId) return;
-                setSavedLibrary((prev) => {
-                    const fromIndex = prev.findIndex((it) => it.id === itemId);
-                    if (fromIndex < 0) return prev;
-                    const boundedTarget = Math.max(0, Math.min(toIndex, prev.length - 1));
-                    return moveArrayItem(prev, fromIndex, boundedTarget);
-                });
-                setDreamState((prev) => {
-                    const fromIndex = prev.results.findIndex((it) => it.id === itemId);
-                    if (fromIndex < 0) return prev;
-                    const boundedTarget = Math.max(0, Math.min(toIndex, prev.results.length - 1));
-                    return { ...prev, results: moveArrayItem(prev.results, fromIndex, boundedTarget) };
+                return {
+                    sets: normalizeSavedSets(normalized, libraryItems),
+                    itemAssignments,
+                    stageRejects: stageCounts
+                };
+            }, [mergeQualityFilters, normalizeSavedSets, resolveFailTargetSetId]);
+
+            const reorderByDrag = (sourceId, targetId) => {
+                const reorderEnabled = (packConfig?.sortBy || 'none') === 'none';
+                const targetSetRecord = selectedSet || activeTargetSet || null;
+                if (!reorderEnabled || !targetSetRecord || !sourceId || !targetId || sourceId === targetId) return;
+                setSavedSets((prev) => {
+                    const normalized = normalizeSavedSets(prev, savedLibraryRef.current);
+                    const next = normalized.map((setRecord) => {
+                        if (setRecord.id !== targetSetRecord.id) return setRecord;
+                        const fromIndex = setRecord.itemIds.findIndex((itemId) => itemId === sourceId);
+                        const toIndex = setRecord.itemIds.findIndex((itemId) => itemId === targetId);
+                        if (fromIndex < 0 || toIndex < 0) return setRecord;
+                        return { ...setRecord, itemIds: moveArrayItem(setRecord.itemIds, fromIndex, toIndex) };
+                    });
+                    return normalizeSavedSets(next, savedLibraryRef.current);
                 });
             };
-            const sendToFront = (itemId) => moveLibraryItemToIndex(itemId, 0);
+            const moveSetItemToIndex = (itemId, toIndex) => {
+                const reorderEnabled = (packConfig?.sortBy || 'none') === 'none';
+                const targetSetRecord = selectedSet || activeTargetSet || null;
+                if (!reorderEnabled || !targetSetRecord || !itemId) return;
+                setSavedSets((prev) => {
+                    const normalized = normalizeSavedSets(prev, savedLibraryRef.current);
+                    const next = normalized.map((setRecord) => {
+                        if (setRecord.id !== targetSetRecord.id) return setRecord;
+                        const fromIndex = setRecord.itemIds.findIndex((candidateId) => candidateId === itemId);
+                        if (fromIndex < 0) return setRecord;
+                        const boundedTarget = Math.max(0, Math.min(toIndex, setRecord.itemIds.length - 1));
+                        return { ...setRecord, itemIds: moveArrayItem(setRecord.itemIds, fromIndex, boundedTarget) };
+                    });
+                    return normalizeSavedSets(next, savedLibraryRef.current);
+                });
+            };
+            const sendToFront = (itemId) => moveSetItemToIndex(itemId, 0);
             const sendToBack = (itemId) => {
-                const total = savedLibraryRef.current?.length || savedLibrary.length || 0;
-                moveLibraryItemToIndex(itemId, Math.max(0, total - 1));
+                const total = selectedSet?.itemIds?.length || 0;
+                moveSetItemToIndex(itemId, Math.max(0, total - 1));
+            };
+
+            const createSet = () => {
+                const nextSetName = (() => {
+                    const names = new Set((savedSetsRef.current || []).map((setRecord) => setRecord.name));
+                    let volumeNumber = 1;
+                    while (names.has(`Volume ${volumeNumber}`)) volumeNumber++;
+                    return `Volume ${volumeNumber}`;
+                })();
+                const nextSet = buildSetRecord(nextSetName, {
+                    qualityFilters,
+                    evaluationStage: DEFAULT_SET_EVALUATION_STAGE,
+                    failTargetSetId: REJECTS_SET_ID
+                });
+                setSavedSets((prev) => normalizeSavedSets([...normalizeSavedSets(prev, savedLibraryRef.current), nextSet], savedLibraryRef.current));
+                setSelectedSetId(nextSet.id);
+                return nextSet;
             };
 
             const handleRenameSet = (targetSet, newName) => {
-                const trimmedName = (newName || '').trim();
-                if (!trimmedName) return;
-                if (packConfig.groupBy === 'volume_fill') {
-                    setPackConfig(prev => ({
-                        ...prev,
-                        setNameOverrides: {
-                            ...(prev?.setNameOverrides || {}),
-                            [targetSet?.id || '__all__']: trimmedName
+                const trimmedName = String(newName || '').trim();
+                if (!targetSet?.id || !trimmedName) return;
+                setSavedSets((prev) => prev.map((setRecord) => setRecord.id === targetSet.id ? { ...setRecord, name: trimmedName } : setRecord));
+            };
+            const updateSetPolicy = (setId, patch) => {
+                setSavedSets((prev) => normalizeSavedSets(prev.map((setRecord) => {
+                    if (setRecord.id !== setId) return setRecord;
+                    const nextFailTarget = patch?.failTargetSetId === setId ? REJECTS_SET_ID : patch?.failTargetSetId;
+                    return {
+                        ...setRecord,
+                        ...patch,
+                        failTargetSetId: typeof nextFailTarget === 'undefined' ? setRecord.failTargetSetId : nextFailTarget
+                    };
+                }), savedLibraryRef.current));
+            };
+            const updateSetQuality = (setId, section, key, value) => {
+                setSavedSets((prev) => normalizeSavedSets(prev.map((setRecord) => {
+                    if (setRecord.id !== setId) return setRecord;
+                    return {
+                        ...setRecord,
+                        qualityFilters: {
+                            ...mergeQualityFilters(setRecord.qualityFilters),
+                            [section]: {
+                                ...mergeQualityFilters(setRecord.qualityFilters)[section],
+                                [key]: value
+                            }
                         }
-                    }));
-                    return;
-                }
-                const newNameBase = trimmedName.replace(/\s+/g, '_') || 'Set';
-                setSavedLibrary(prev => {
-                    const setItemIds = new Set(Array.isArray(targetSet?.items) ? targetSet.items.map(i => i.id) : []);
-                    let groupItems = prev.filter(i => setItemIds.has(i.id));
-                    if (groupItems.length === 0) {
-                        const oldKey = typeof targetSet === 'string' ? targetSet : (targetSet?.baseKey || targetSet?.name || '');
-                        const normalizedOldKey = (oldKey || '').replace(/\s+Vol\s+\d+$/i, '').replace(/\s+/g, '_');
-                        groupItems = prev.filter(i => i.name.split('_').slice(0, -1).join('_') === normalizedOldKey);
-                    }
-                    const groupOrder = groupItems.map(i => i.id);
-                    return prev.map((item) => {
-                        const groupIdx = groupOrder.indexOf(item.id);
-                        if (groupIdx < 0) return item;
-                        const indexStr = (groupIdx + 1).toString().padStart(2, '0');
-                        return { ...item, name: `${newNameBase}_${indexStr}` };
-                    });
-                });
+                    };
+                }), savedLibraryRef.current));
+            };
+            const toggleSetQualityEnabled = (setId, section) => {
+                setSavedSets((prev) => normalizeSavedSets(prev.map((setRecord) => {
+                    if (setRecord.id !== setId) return setRecord;
+                    const merged = mergeQualityFilters(setRecord.qualityFilters);
+                    return {
+                        ...setRecord,
+                        qualityFilters: {
+                            ...merged,
+                            [section]: {
+                                ...merged[section],
+                                enabled: !merged[section].enabled
+                            }
+                        }
+                    };
+                }), savedLibraryRef.current));
+            };
+            const toggleSetQualityExpanded = (setId, section) => {
+                setSavedSets((prev) => normalizeSavedSets(prev.map((setRecord) => {
+                    if (setRecord.id !== setId) return setRecord;
+                    const merged = mergeQualityFilters(setRecord.qualityFilters);
+                    return {
+                        ...setRecord,
+                        qualityFilters: {
+                            ...merged,
+                            [section]: {
+                                ...merged[section],
+                                expanded: !merged[section].expanded
+                            }
+                        }
+                    };
+                }), savedLibraryRef.current));
             };
 
             const buildEnabledFilterSteps = () => filterModules
@@ -660,40 +892,6 @@
                     if (similarity > bestSimilarity) bestSimilarity = similarity;
                 }
                 return bestSimilarity;
-            };
-
-            const runStageAlphaAndSimplicityGate = (analysis) => {
-                const alphaFilter = qualityFilters.alpha;
-                if (alphaFilter.enabled && (analysis.density < alphaFilter.min || analysis.density > alphaFilter.max)) return { pass: false, reason: 'alpha' };
-                const simplicityFilter = qualityFilters.simplicity;
-                if (simplicityFilter.enabled && (analysis.sScore < simplicityFilter.min || analysis.sScore > simplicityFilter.max)) return { pass: false, reason: 'simplicity' };
-                return { pass: true, reason: '' };
-            };
-
-            const runStageShapeGate = (analysis) => {
-                const shapeFilter = qualityFilters.shape;
-                if (!shapeFilter.enabled) return { pass: true, reason: '' };
-                if (analysis.circularity < shapeFilter.minCircularity || analysis.circularity > shapeFilter.maxCircularity) return { pass: false, reason: 'shape' };
-                if (analysis.squareness < shapeFilter.minSquareness || analysis.squareness > shapeFilter.maxSquareness) return { pass: false, reason: 'shape' };
-                return { pass: true, reason: '' };
-            };
-
-            const runStageSimilarityGate = (analysis, recentHashes) => {
-                const similarityFilter = qualityFilters.similarity;
-                if (!similarityFilter.enabled || !analysis.hash) return { pass: true, reason: '', similarity: 0 };
-                const bestSimilarity = getBestSimilarity(analysis.hash, recentHashes, similarityFilter.historySize);
-                if (bestSimilarity > similarityFilter.maxSimilarity) return { pass: false, reason: 'similarity', similarity: bestSimilarity };
-                return { pass: true, reason: '', similarity: bestSimilarity };
-            };
-
-            const runStageTemporalGate = (analysis) => {
-                const temporalFilter = qualityFilters.temporalChange;
-                if (!temporalFilter.enabled) return { pass: true, reason: '' };
-                const changeScore = Number(analysis.changeScore || 0);
-                const jitterScore = Number(analysis.jitterScore || 0);
-                if (changeScore < temporalFilter.minChange || changeScore > temporalFilter.maxChange) return { pass: false, reason: 'temporal' };
-                if (jitterScore > temporalFilter.maxJitter) return { pass: false, reason: 'temporal' };
-                return { pass: true, reason: '' };
             };
 
             const computeTemporalMetricsForConfig = (engine, baseConfig, frameCount, seed, renderOptions) => {
@@ -874,6 +1072,7 @@
                 const temporalFrameCount = Math.max(4, Math.min(8, Math.round((dreamParams.flipFrames || 16) * 0.5)));
                 const commitChunkSize = Math.max(6, Math.round(6 + initialOverdrive * 24));
                 const maxAttemptsPerJob = 6;
+                const dreamTargetSetId = activeTargetSetId || PRIMARY_SET_ID;
                 const isEngineContextLost = (engine) => {
                     const gl = engine?.gl;
                     if (!gl) return true;
@@ -891,7 +1090,6 @@
 
                 const snapshotLibrary = savedLibraryRef.current || [];
                 let existingNames = new Set(snapshotLibrary.map(i => i.name));
-                const acceptedHashes = snapshotLibrary.map(i => i.hash).filter(Boolean);
                 const stageRejects = createStageRejectCounters();
                 let acceptedTotal = 0;
                 let attemptedTotal = 0;
@@ -931,8 +1129,24 @@
                     if (!force && pendingResultItems.length < commitChunkSize && performance.now() - lastCommitAt < 250) return;
                     if (!pendingResultItems.length && !pendingLibraryItems.length) return;
                     const toLibrary = pendingLibraryItems.splice(0, pendingLibraryItems.length);
-                    const toResults = pendingResultItems.splice(0, pendingResultItems.length);
-                    if (toLibrary.length) setSavedLibrary(prev => [...prev, ...toLibrary]);
+                    let toResults = pendingResultItems.splice(0, pendingResultItems.length);
+                    if (toLibrary.length) {
+                        const nextLibrary = [...(savedLibraryRef.current || []), ...toLibrary];
+                        const routing = assignItemsToSetWithRouting(
+                            savedSetsRef.current || [],
+                            toLibrary.map((item) => ({ item, targetSetId: dreamTargetSetId })),
+                            nextLibrary
+                        );
+                        acceptedTotal += routing.itemAssignments.filter((entry) => !entry.routed).length;
+                        rejectedTotal += routing.itemAssignments.filter((entry) => entry.routed).length;
+                        Object.entries(routing.stageRejects).forEach(([key, value]) => {
+                            if (Object.prototype.hasOwnProperty.call(stageRejects, key)) stageRejects[key] += value;
+                        });
+                        const assignedSetByItemId = new Map(routing.itemAssignments.map((entry) => [entry.itemId, entry.finalSetId]));
+                        toResults = toResults.map((item) => ({ ...item, setId: assignedSetByItemId.get(item.id) || dreamTargetSetId }));
+                        setSavedLibrary(nextLibrary);
+                        setSavedSets(routing.sets);
+                    }
                     if (toResults.length) {
                         setDreamState(p => ({
                             ...p,
@@ -1007,35 +1221,10 @@
                                 workerEngine.renderStack(cfg, renderOptions);
                                 const analysis = workerEngine.analyzeTexture(cfg.length - 1);
 
-                                const stageAlpha = runStageAlphaAndSimplicityGate(analysis);
-                                if (!stageAlpha.pass) {
-                                    rejectedTotal++;
-                                    countReject(stageRejects, stageAlpha.reason);
-                                    continue;
-                                }
-                                const stageShape = runStageShapeGate(analysis);
-                                if (!stageShape.pass) {
-                                    rejectedTotal++;
-                                    countReject(stageRejects, stageShape.reason);
-                                    continue;
-                                }
-                                const stageSimilarity = runStageSimilarityGate(analysis, acceptedHashes);
-                                if (!stageSimilarity.pass) {
-                                    rejectedTotal++;
-                                    countReject(stageRejects, stageSimilarity.reason);
-                                    continue;
-                                }
-
                                 // Stage 4 gate: expensive temporal check at lower resolution and fewer frames.
                                 const temporalMetrics = computeTemporalMetricsForConfig(workerEngine, cfg, temporalFrameCount, `dream-${loopCounter}-${jobIndex}-${attempt}`, renderOptions);
                                 analysis.changeScore = temporalMetrics.changeScore;
                                 analysis.jitterScore = temporalMetrics.jitterScore;
-                                const stageTemporal = runStageTemporalGate(analysis);
-                                if (!stageTemporal.pass) {
-                                    rejectedTotal++;
-                                    countReject(stageRejects, stageTemporal.reason);
-                                    continue;
-                                }
 
                                 const baseItem = {
                                     config: cfg,
@@ -1051,8 +1240,6 @@
                                     renderOptions
                                 };
                                 existingNames.add(baseItem.name);
-                                if (analysis.hash) acceptedHashes.push(analysis.hash);
-                                acceptedTotal++;
                                 backfillQueue.push(baseItem);
                                 break;
                             }
@@ -1129,30 +1316,34 @@
 	                    const rs = [256, 512, 1024, 2048];
 	                    const exportStem = normalizeExportStem(targetSet.name);
 	                    const packWorkers = Math.max(1, Math.min(MAX_PACKAGING_WORKERS, parseInt(dreamParams.packagingWorkers || 1)));
+                        const itemsPerPack = Math.max(1, parseInt(packConfig?.maxItemsPerPack || 50, 10) || 50);
+                        const targetItems = sortItemsForPack(targetSet.items, packConfig);
 	                    for (const r of rs) {
 	                        setExportPhase(`Exporting ${r}px textures...`);
 	                        const resFolder = zip.folder(`${exportStem}_${r}`);
-	                        const rendered = new Array(targetSet.items.length);
-	                        const engines = Array.from({ length: Math.min(packWorkers, targetSet.items.length) }, () => new TextureEngine(r, r));
-	                        await VMUtils.runWorkerPool(targetSet.items.length, engines.length || 1, async (idx, slot) => {
+	                        const rendered = new Array(targetItems.length);
+	                        const engines = Array.from({ length: Math.min(packWorkers, targetItems.length) }, () => new TextureEngine(r, r));
+	                        await VMUtils.runWorkerPool(targetItems.length, engines.length || 1, async (idx, slot) => {
 	                            const engine = engines[slot] || engines[0];
-	                            const item = targetSet.items[idx];
+	                            const item = targetItems[idx];
 	                            engine.renderStack(item.config);
 	                            rendered[idx] = {};
                                 for (const mode of OUTPUT_EXPORT_MODES) {
 	                                rendered[idx][mode] = await engine.getTextureBlob(item.config.length - 1, 'image/png', undefined, { mode });
                                 }
 	                        });
-	                        for (let idx = 0; idx < targetSet.items.length; idx++) {
+	                        for (let idx = 0; idx < targetItems.length; idx++) {
+                                const packIndex = Math.floor(idx / itemsPerPack) + 1;
+                                const packFolder = resFolder.folder(`Pack_${String(packIndex).padStart(2, '0')}`);
 	                            const fileName = `${exportStem}_${(idx + 1).toString().padStart(2, '0')}_x${r}`;
                                 for (const mode of OUTPUT_EXPORT_MODES) {
-	                                resFolder.file(`${fileName}_${getOutputFileSuffix(mode)}.png`, rendered[idx]?.[mode] || new Blob());
+	                                packFolder.file(buildOutputFileName(fileName, mode), rendered[idx]?.[mode] || new Blob());
                                 }
 	                        }
 	                    }
 	                    const flipbooksRoot = zip.folder(`${exportStem}_Flipbooks`);
-	                    for (let itIdx = 0; itIdx < targetSet.items.length; itIdx++) {
-	                        const item = targetSet.items[itIdx];
+	                    for (let itIdx = 0; itIdx < targetItems.length; itIdx++) {
+	                        const item = targetItems[itIdx];
 	                        const indexPadded = (itIdx + 1).toString().padStart(2, '0');
 	                        const baseFileName = `${exportStem}_${indexPadded}`;
 	                        const fE = new TextureEngine(1024, 1024);
@@ -1189,7 +1380,7 @@
 	                            const spriteSheetBlob = await new Promise((resolve) => {
 	                                sC.toBlob((blob) => resolve(blob || new Blob()), 'image/png');
 	                            });
-                                    flipbooksRoot.file(`${flipbookFileName}_${getOutputFileSuffix(mode)}.png`, spriteSheetBlob);
+                                    flipbooksRoot.file(buildOutputFileName(flipbookFileName, mode), spriteSheetBlob);
                                 }
 	                        }
 	                    }
@@ -1207,41 +1398,24 @@
             };
 
             const handleDeleteSet = async (targetSet) => {
-                if (!targetSet?.items?.length) return;
-                const currentLibrary = savedLibraryRef.current || savedLibrary;
-                const currentResults = dreamResultsRef.current || dreamState.results;
-                const removeIds = new Set(targetSet.items.map(it => it.id));
-                const removeStorageKeys = new Set(targetSet.items.map(it => it.storageKey).filter(Boolean));
-
-                const removedItems = currentLibrary.filter(it => removeIds.has(it.id) || (it.storageKey && removeStorageKeys.has(it.storageKey)));
-                const removedResults = currentResults.filter(it => removeIds.has(it.id) || (it.storageKey && removeStorageKeys.has(it.storageKey)));
-                const nextLibrary = currentLibrary.filter(it => !removeIds.has(it.id) && (!it.storageKey || !removeStorageKeys.has(it.storageKey)));
-                const nextResults = removeResultsByFillMode(
-                    currentResults,
-                    (it) => removeIds.has(it.id) || (it.storageKey && removeStorageKeys.has(it.storageKey)),
-                    dreamParams.resultFillMode
-                );
-
-                setSavedLibrary(nextLibrary);
-                setDreamState(prev => ({ ...prev, results: nextResults }));
-
-                removedResults.forEach((it) => {
-                    if (it?.url && typeof it.url === 'string' && it.url.startsWith('blob:')) {
-                        URL.revokeObjectURL(it.url);
-                    }
+                if (!targetSet?.id || targetSet.system) return;
+                setSavedSets((prev) => {
+                    const normalized = normalizeSavedSets(prev, savedLibraryRef.current);
+                    const target = normalized.find((setRecord) => setRecord.id === targetSet.id);
+                    if (!target) return normalized;
+                    const rejectsId = normalized.some((setRecord) => setRecord.id === REJECTS_SET_ID) ? REJECTS_SET_ID : resolveFailTargetSetId(target, normalized);
+                    const next = normalized
+                        .filter((setRecord) => setRecord.id !== target.id)
+                        .map((setRecord) => {
+                            if (setRecord.id !== rejectsId) return setRecord;
+                            return {
+                                ...setRecord,
+                                itemIds: [...setRecord.itemIds, ...target.itemIds.filter((itemId) => !setRecord.itemIds.includes(itemId))]
+                            };
+                        });
+                    return normalizeSavedSets(next, savedLibraryRef.current);
                 });
-
-                const keysToCleanup = [...new Set([...removedItems, ...removedResults].map(it => it.storageKey).filter(Boolean))];
-                for (const key of keysToCleanup) {
-                    await cleanupStorageIfUnreferenced(key, nextLibrary, nextResults);
-                }
-
-                pushDeleteHistory({
-                    id: `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                    type: 'set',
-                    label: targetSet.name || 'Set',
-                    items: removedItems
-                });
+                setSelectedSetId((prev) => prev === targetSet.id ? PRIMARY_SET_ID : prev);
             };
 
             const handleDeleteAllGlobal = async () => {
@@ -1256,6 +1430,7 @@
                 });
 
                 setSavedLibrary([]);
+                setSavedSets(normalizeSavedSets([], []));
                 setDreamState(prev => ({ ...prev, results: [] }));
 
                 const keysToCleanup = [...new Set(
@@ -1420,7 +1595,7 @@
                             e.renderStack(steps);
                             for (const mode of OUTPUT_EXPORT_MODES) {
                                 const blob = await e.getTextureBlob(steps.length - 1, 'image/png', undefined, { mode });
-                                z.file(`${profileName}_${r}_${getOutputFileSuffix(mode)}.png`, blob);
+                                z.file(buildOutputFileName(`${profileName}_${r}`, mode), blob);
                             }
                         }
                         const c = await z.generateAsync({ type: "blob", compression: "STORE" });
@@ -1449,13 +1624,36 @@
 	                library: {
 	                    items: savedLibrary,
 	                    sets,
+                    selectedSet,
+                    selectedSetId,
+                    setSelectedSetId,
+                    activeTargetSet,
+                    activeTargetSetId,
+                    setActiveTargetSetId,
 	                    packConfig,
 	                    setPackConfig,
-	                    reorganizePacks,
 	                    reorderByDrag,
                     sendToFront,
                     sendToBack,
-	                    onSave: (it) => setSavedLibrary(p => [...p, { ...it, url: null }]),
+                    getItemSetId,
+                    getSetNameById,
+                    createSet,
+	                    onSave: (it) => {
+                            if (!it?.id) return;
+                            const persistedItem = { ...it, url: null };
+                            const currentLibrary = savedLibraryRef.current || [];
+                            const existingItem = currentLibrary.find((item) => item.id === persistedItem.id);
+                            const nextLibrary = existingItem
+                                ? currentLibrary.map((item) => item.id === persistedItem.id ? { ...item, ...persistedItem } : item)
+                                : [...currentLibrary, persistedItem];
+                            setSavedLibrary(nextLibrary);
+                            const routing = assignItemsToSetWithRouting(
+                                savedSetsRef.current || [],
+                                [{ item: persistedItem, targetSetId: activeTargetSetId || PRIMARY_SET_ID }],
+                                nextLibrary
+                            );
+                            setSavedSets(routing.sets);
+                        },
 	                    onLoad: (cfg) => { setSteps(hydrateConfigDefaults(cfg)); setActiveTab('builder'); },
                     onDelete: async (id) => {
                         const currentLibrary = savedLibraryRef.current || savedLibrary;
@@ -1470,6 +1668,10 @@
                             dreamParams.resultFillMode
                         );
                         setSavedLibrary(nextLibrary);
+                        setSavedSets((prev) => normalizeSavedSets(prev.map((setRecord) => ({
+                            ...setRecord,
+                            itemIds: setRecord.itemIds.filter((itemId) => itemId !== id)
+                        })), nextLibrary));
                         setDreamState(prev => ({ ...prev, results: nextResults }));
                         currentResults.forEach((it) => {
                             const sameRef = it.id === id || (targetStorageKey && it.storageKey === targetStorageKey);
@@ -1488,6 +1690,10 @@
                         }
                     },
                     renameSet: handleRenameSet,
+                    updateSetPolicy,
+                    updateSetQuality,
+                    toggleSetQualityEnabled,
+                    toggleSetQualityExpanded,
                     exportSet: handleExportSet,
                     deleteSet: handleDeleteSet,
                     deleteAllSets: handleDeleteAllGlobal,
