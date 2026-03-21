@@ -1,0 +1,182 @@
+{
+  "loop_name": "toolchain_readiness",
+  "iteration": 1,
+  "verdict": "pass",
+  "captures": [
+    "/Users/crimsonwheeler/Documents/GitHub/NexusTextureFactory/NexusTextureFactory-Spinosaurus/.human-view/captures/2026-03-21T07-22-06-552Z-toolchain-1.png"
+  ],
+  "console": [
+    {
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold",
+      "at": "2026-03-21T07:21:26.251Z"
+    },
+    {
+      "type": "warning",
+      "text": "cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation",
+      "at": "2026-03-21T07:21:26.363Z"
+    },
+    {
+      "type": "warning",
+      "text": "Scripts \"build/three.js\" and \"build/three.min.js\" are deprecated with r150+, and will be removed with r160. Please use ES Modules or alternatives: https://threejs.org/docs/index.html#manual/en/introduction/Installation",
+      "at": "2026-03-21T07:21:26.370Z"
+    },
+    {
+      "type": "warning",
+      "text": "You are using the in-browser Babel transformer. Be sure to precompile your scripts for production - https://babeljs.io/docs/setup/",
+      "at": "2026-03-21T07:21:26.415Z"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "at": "2026-03-21T07:21:26.944Z"
+    },
+    {
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold",
+      "at": "2026-03-21T07:22:04.660Z"
+    },
+    {
+      "type": "warning",
+      "text": "cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation",
+      "at": "2026-03-21T07:22:04.697Z"
+    },
+    {
+      "type": "warning",
+      "text": "Scripts \"build/three.js\" and \"build/three.min.js\" are deprecated with r150+, and will be removed with r160. Please use ES Modules or alternatives: https://threejs.org/docs/index.html#manual/en/introduction/Installation",
+      "at": "2026-03-21T07:22:04.703Z"
+    },
+    {
+      "type": "warning",
+      "text": "You are using the in-browser Babel transformer. Be sure to precompile your scripts for production - https://babeljs.io/docs/setup/",
+      "at": "2026-03-21T07:22:04.742Z"
+    }
+  ],
+  "network": [
+    {
+      "method": "GET",
+      "url": "https://unpkg.com/@babel/standalone@7.29.2/babel.min.js",
+      "at": "2026-03-21T07:21:25.551Z"
+    },
+    {
+      "method": "GET",
+      "url": "https://unpkg.com/react@18.3.1/umd/react.development.js",
+      "at": "2026-03-21T07:21:25.600Z"
+    },
+    {
+      "method": "GET",
+      "url": "https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js",
+      "at": "2026-03-21T07:21:25.700Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/model/core.js",
+      "at": "2026-03-21T07:21:26.416Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/model/previewRuntime.js",
+      "at": "2026-03-21T07:21:26.417Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/model/humanViewHttpBridge.js",
+      "at": "2026-03-21T07:21:26.417Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/view/components.js",
+      "at": "2026-03-21T07:21:26.417Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/viewmodel/utils.js",
+      "at": "2026-03-21T07:21:26.417Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/viewmodel/useAppViewModel.js",
+      "at": "2026-03-21T07:21:26.417Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/view/App.js",
+      "at": "2026-03-21T07:21:26.417Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/",
+      "at": "2026-03-21T07:22:04.612Z"
+    },
+    {
+      "method": "GET",
+      "url": "https://unpkg.com/react@18/umd/react.development.js",
+      "at": "2026-03-21T07:22:04.656Z"
+    },
+    {
+      "method": "GET",
+      "url": "https://unpkg.com/react-dom@18/umd/react-dom.development.js",
+      "at": "2026-03-21T07:22:04.659Z"
+    },
+    {
+      "method": "GET",
+      "url": "https://unpkg.com/@babel/standalone/babel.min.js",
+      "at": "2026-03-21T07:22:04.659Z"
+    },
+    {
+      "method": "GET",
+      "url": "https://cdn.tailwindcss.com/",
+      "at": "2026-03-21T07:22:04.660Z"
+    },
+    {
+      "method": "GET",
+      "url": "https://unpkg.com/three@0.160.0/build/three.min.js",
+      "at": "2026-03-21T07:22:04.660Z"
+    },
+    {
+      "method": "GET",
+      "url": "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
+      "at": "2026-03-21T07:22:04.660Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/styles/global.css",
+      "at": "2026-03-21T07:22:04.660Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/model/core.js",
+      "at": "2026-03-21T07:22:04.758Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/model/previewRuntime.js",
+      "at": "2026-03-21T07:22:04.758Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/model/humanViewHttpBridge.js",
+      "at": "2026-03-21T07:22:04.758Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/view/components.js",
+      "at": "2026-03-21T07:22:04.758Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/viewmodel/utils.js",
+      "at": "2026-03-21T07:22:04.758Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/viewmodel/useAppViewModel.js",
+      "at": "2026-03-21T07:22:04.758Z"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:3014/src/view/App.js",
+      "at": "2026-03-21T07:22:04.758Z"
+    }
+  ]
+}

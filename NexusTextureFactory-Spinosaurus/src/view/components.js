@@ -1,4 +1,63 @@
-	        function TextureItemFlip({ item, onClick, onSave, onDelete, engine, isRejected, rejectLabel, flipFrames, autoAnimate = false, flipbookConfig = null, dragEnabled = false, onReorder = null, onSendToFront = null, onSendToBack = null, displayName = null, maskViewMode = DEFAULT_MASK_VIEW_MODE }) {
+        const INTEGRATIONS_GUIDE_TEXT = `INTEGRATIONS GUIDE
+
+Purpose
+- Use this tab as the operator guide for the local human-view tools.
+- The preferred control surface is the app's in-app command surface when available.
+- For Spinosaurus, that command surface is currently the local HTTP RPC companion.
+- If a future native app does not expose a usable in-app surface, the Python bridge is the native-only fallback.
+
+How to use the tools
+1. Start the local companion if it is not already running.
+2. Open the app and confirm the preview or settings state you want to inspect.
+3. Use the smallest tool that proves the visible result.
+4. Capture before and after evidence when the change affects what a human would see.
+5. Prefer the command surface first, then browser-visible tooling for web surfaces, then Python only for native surfaces.
+
+Available companion tools
+- GET /health
+- POST /session/start
+- POST /session/stop
+- POST /app/open
+- POST /app/reload
+- GET /app/status
+- POST /capture/full_app
+- POST /capture/viewport
+- POST /capture/element
+- GET /capture/latest
+- GET /inspect/console
+- GET /inspect/network
+- POST /inspect/dom_snapshot
+- POST /action/navigate
+- POST /action/click
+- POST /action/type
+- POST /action/select
+- POST /action/press
+- POST /particle/open_preview
+- POST /particle/select_source
+- POST /particle/select_preset
+- POST /particle/apply_control_set
+- POST /particle/run_validation_pass
+- POST /loop/run
+- GET /loop/status
+- POST /loop/stop
+
+Recommended loop
+1. GET /health
+2. POST /session/start
+3. POST /app/open
+4. POST /particle/open_preview or open the relevant screen
+5. Capture a baseline screenshot
+6. Make one controlled change
+7. Capture again
+8. Compare the visible result
+9. Read console and network logs if the result is unclear
+
+Clipboard copy
+- The copy button copies this guide text exactly.
+- If clipboard access is blocked by the browser, use the visible guide text as the source of truth.
+`;
+
+	        function TextureItemFlip({ item, onClick, onSave, onDelete, onPreview, engine, isRejected, rejectLabel, flipFrames, autoAnimate = false, flipbookConfig = null, dragEnabled = false, onReorder = null, onSendToFront = null, onSendToBack = null, displayName = null, maskViewMode = DEFAULT_MASK_VIEW_MODE }) {
             const [frames, setFrames] = useState([]); const [fi, setFi] = useState(0); const [isH, setIsH] = useState(false); const [isL, setIsL] = useState(false); const [storedUrl, setStoredUrl] = useState(item.url || null); const [displayUrl, setDisplayUrl] = useState(item.url || null); const [flipbookReject, setFlipbookReject] = useState(''); const hT = useRef(null); const aI = useRef(null);
             const fmtScore = (value) => (typeof value === 'number' && !Number.isNaN(value) ? value.toFixed(2) : '--');
             const fmtPct = (value) => (typeof value === 'number' && !Number.isNaN(value) ? `${(value * 100).toFixed(0)}%` : '--');
@@ -139,6 +198,7 @@
 	                        <div className="absolute top-2 right-2 flex flex-col items-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <div className="flex gap-1">
 	                            {onClick && <button onClick={() => onClick(item.config)} className="w-6 h-6 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Edit">✎</button>}
+                                {onPreview && <button onClick={() => onPreview(item.id)} className="min-w-[28px] h-6 px-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-[9px] flex items-center justify-center shadow-lg font-bold" title="Preview">3D</button>}
 	                            {onSave && <button onClick={() => onSave(item)} className="w-6 h-6 bg-green-600 hover:bg-green-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Save">💾</button>}
 	                            {onDelete && <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="w-6 h-6 bg-gray-600 hover:bg-gray-500 text-white rounded text-xs flex items-center justify-center shadow-lg" title="Delete">🗑</button>}
                             </div>
@@ -196,7 +256,7 @@
             );
         }
 
-        function FactoryLadderItem({ item, onClick, maskViewMode = DEFAULT_MASK_VIEW_MODE, setName = '' }) {
+        function FactoryLadderItem({ item, onClick, onPreview, maskViewMode = DEFAULT_MASK_VIEW_MODE }) {
             const [storedUrl, setStoredUrl] = useState(item.url || null);
             const [displayUrl, setDisplayUrl] = useState(item.url || null);
             const fmtScore = (value) => (typeof value === 'number' && !Number.isNaN(value) ? value.toFixed(2) : '--');
@@ -253,14 +313,16 @@
                 return () => { cancelled = true; };
             }, [storedUrl, item?.url, maskViewMode]);
             return (
-                <button onClick={() => onClick?.(item.config)} className="w-full h-[92px] bg-[#111] border border-gray-800 hover:border-blue-500/70 rounded overflow-hidden flex items-stretch text-left">
+                <div className="w-full h-[92px] bg-[#111] border border-gray-800 hover:border-blue-500/70 rounded overflow-hidden flex items-stretch text-left">
                     <div className="w-[92px] h-[92px] shrink-0 checkerboard bg-black border-r border-gray-800">
-                        <img src={displayUrl || storedUrl || item.url} className="w-full h-full object-contain" />
+                        <button onClick={() => onClick?.(item.config)} className="w-full h-full">
+                            <img src={displayUrl || storedUrl || item.url} className="w-full h-full object-contain" />
+                        </button>
                     </div>
-                    <div className="flex-1 px-3 py-2 flex flex-col justify-between">
-                        <div>
-                            <div className="text-[11px] text-white font-mono truncate">{item.name}</div>
-                            {setName && <div className="text-[9px] text-blue-300 font-mono mt-1 uppercase tracking-wide">{setName}</div>}
+                    <div className="flex-1 px-3 py-2 flex flex-col justify-between min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                            <button onClick={() => onClick?.(item.config)} className="text-[11px] text-white font-mono truncate text-left">{item.name}</button>
+                            {onPreview && <button onClick={() => onPreview(item.id)} className="text-[9px] px-2 py-1 rounded bg-violet-600 hover:bg-violet-500 text-white font-bold shrink-0">3D</button>}
                         </div>
                         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-gray-400 font-mono">
                             <div>alpha: {fmtScore(item.density)}</div>
@@ -271,7 +333,7 @@
                             <div>jitter: {fmtPct(item.jitterScore)}</div>
                         </div>
                     </div>
-                </button>
+                </div>
             );
         }
 
@@ -425,6 +487,8 @@
             const pageEnd = pageStart + pageSize;
             const pageResults = results.slice(pageStart, pageEnd);
             const liveStart = Math.max(0, pageResults.length - 24);
+            const cfg = libVM?.packConfig || {};
+            const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
             const complexityRangeRef = useRef(null);
             const complexityDragHandleRef = useRef(null);
             const complexityMinBound = 1;
@@ -495,7 +559,7 @@
                         </div>
 	                        {showC && (
 		                            <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 mb-4 overflow-x-auto config-scroll">
-                                    <div className="grid grid-cols-4 gap-6">
+                                    <div className="grid grid-cols-3 gap-6">
                                         <div className="flex flex-col gap-1">
                                             <div className="flex justify-between text-gray-400"><span>Overdrive</span><span>{overdrivePercent}%</span></div>
                                             <input type="range" min="0" max="1" step="0.01" value={overdrive} onChange={(e) => dVM.setParams(p => ({ ...p, overdrive: parseFloat(e.target.value) }))} className="slider-thumb w-full" />
@@ -514,13 +578,6 @@
                                             <input type="range" min="0" max="1" step="0.01" value={dVM.params.randStrength || 0} onChange={(e) => dVM.setParams(p => ({ ...p, randStrength: parseFloat(e.target.value) }))} disabled={!uiVM?.useWorkbenchSeed} className={`slider-thumb w-full ${uiVM?.useWorkbenchSeed ? '' : 'opacity-40 cursor-not-allowed'}`} />
                                             <div className="text-[10px] text-gray-500">{uiVM?.useWorkbenchSeed ? 'Applies only to active seeded workbench steps.' : 'Enable workbench seeding in Settings to use this.'}</div>
                                         </div>
-                                        <div className="flex flex-col gap-1">
-                                            <div className="flex justify-between text-gray-400"><span>Target Set</span><span>{libVM?.activeTargetSet?.name || 'Volume 1'}</span></div>
-                                            <select value={libVM?.activeTargetSetId || ''} onChange={(e) => libVM?.setActiveTargetSetId?.(e.target.value)} className="bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-sm text-white">
-                                                {(libVM?.sets || []).map((setRecord) => <option key={setRecord.id} value={setRecord.id}>{setRecord.name}</option>)}
-                                            </select>
-                                            <div className="text-[10px] text-gray-500">Dream and manual saves route through this set before any fail target is applied.</div>
-                                        </div>
                                     </div>
                             </div>
                         )}
@@ -530,12 +587,7 @@
                         {dVM.isDreaming && <div className="fixed top-24 left-1/2 -translate-x-1/2 bg-black/90 px-6 py-2 rounded-full border border-purple-500 text-purple-400 text-xs font-mono animate-pulse z-40 shadow-2xl">{dVM.state.phase} | attempts: {dVM.state.pendingAttempts || 0} | accepted: {dVM.state.pendingAccepted || 0} | rejected: {dVM.state.pendingRejected || 0} | gen:{dVM.state.activeGenWorkers || 0} | backfill:{dVM.state.activeBackfillWorkers || 0} | queue:{dVM.state.pendingBackfill || 0}</div>}
                         <div className="grid grid-cols-2 gap-2">{pageResults.map((it, idx) => {
                             if (it?.__slotOpen) return <OpenFactorySlotRow key={it.id} />;
-                            const itemProps = {
-                                item: it,
-                                onClick: libVM.onLoad,
-                                maskViewMode: uiVM?.maskViewMode,
-                                setName: libVM?.getSetNameById?.(libVM?.getItemSetId?.(it.id))
-                            };
+                            const itemProps = { item: it, onClick: libVM.onLoad, onPreview: libVM.openInPreview, maskViewMode: uiVM?.maskViewMode };
                             return idx >= liveStart ? <FactoryLadderItem key={it.id} {...itemProps} /> : <VirtualizedFactoryItem key={it.id} {...itemProps} />;
                         })}</div>
                         <div className="mt-4 flex items-center justify-center gap-2">
@@ -563,8 +615,7 @@
                 <div className="flex flex-col h-full bg-[#111] p-6">
                     <div className="mb-4">
                         <h2 className="text-xl font-bold text-white">FILTERS</h2>
-                        <p className="text-xs text-gray-400 mt-1">Configure global/default filter templates and operation modules used during generation.</p>
-                        <div className="mt-2 text-[11px] text-blue-300 font-mono">Set-local quality policy now lives in SETS. FILTERS remains the shared default/template surface.</div>
+                        <p className="text-xs text-gray-400 mt-1">Configure acceptance gates and operation modules used during generation.</p>
                     </div>
                     <div className="flex-1 overflow-y-auto space-y-3 pr-1">
                         <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Acceptance Filters</div>
@@ -736,64 +787,9 @@
                     </div>
                     <div className="flex-1 overflow-y-auto">
                         <div className="grid grid-cols-8 gap-4">
-                            {libVM.items.map((it) => <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} onClick={libVM.onLoad} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} maskViewMode={uiVM?.maskViewMode} />)}
+                            {libVM.items.map((it) => <VirtualizedTextureItem key={it.id} item={it} engine={previewEngine} onClick={libVM.onLoad} onPreview={libVM.openInPreview} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} maskViewMode={uiVM?.maskViewMode} />)}
                         </div>
                     </div>
-                </div>
-            );
-        }
-
-        function SetQualityPanel({ setRecord, libVM }) {
-            const quality = setRecord?.qualityFilters || {};
-            const failTargets = (libVM?.sets || []).filter((candidate) => candidate.id !== setRecord.id);
-            return (
-                <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 space-y-4">
-                    <div className="grid grid-cols-2 gap-4 text-xs">
-                        <div className="flex flex-col gap-1">
-                            <label className="text-gray-400">Evaluation Stage</label>
-                            <select value={setRecord.evaluationStage || DEFAULT_SET_EVALUATION_STAGE} onChange={(e) => libVM.updateSetPolicy(setRecord.id, { evaluationStage: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white" disabled={!!setRecord.system && setRecord.id === REJECTS_SET_ID}>
-                                {SET_EVALUATION_STAGES.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
-                            </select>
-                        </div>
-                        <div className="flex flex-col gap-1">
-                            <label className="text-gray-400">Fail Target</label>
-                            <select value={setRecord.failTargetSetId || ''} onChange={(e) => libVM.updateSetPolicy(setRecord.id, { failTargetSetId: e.target.value || null })} className="bg-[#333] border border-gray-600 rounded p-1 text-white" disabled={setRecord.id === REJECTS_SET_ID}>
-                                {failTargets.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
-                            </select>
-                        </div>
-                    </div>
-
-                    {[
-                        { key: 'alpha', label: 'Alpha Overall', controls: [['min', 'Min Alpha Density', 0, 1, 0.01], ['max', 'Max Alpha Density', 0, 1, 0.01]] },
-                        { key: 'similarity', label: 'Similarity To Previous', controls: [['maxSimilarity', 'Max Similarity', 0, 1, 0.01], ['historySize', 'History Size', 10, 500, 10]] },
-                        { key: 'shape', label: 'Shape Bias (Circle / Square)', controls: [['minCircularity', 'Min Circularity', 0, 1, 0.01], ['maxCircularity', 'Max Circularity', 0, 1, 0.01], ['minSquareness', 'Min Squareness', 0, 1, 0.01], ['maxSquareness', 'Max Squareness', 0, 1, 0.01]] },
-                        { key: 'temporalChange', label: 'Temporal Change', controls: [['minChange', 'Min Change', 0, 1, 0.01], ['maxChange', 'Max Change', 0, 1, 0.01], ['maxJitter', 'Max Jitter', 0, 1, 0.01]], format: 'percent' },
-                        { key: 'simplicity', label: 'Simplicity / Smoothness', controls: [['min', 'Min Simplicity', 0, 1, 0.01], ['max', 'Max Simplicity', 0, 1, 0.01]] }
-                    ].map((section) => {
-                        const current = quality[section.key] || {};
-                        const fmt = (value) => section.format === 'percent' ? `${(Number(value || 0) * 100).toFixed(0)}%` : Number(value || 0).toFixed(2);
-                        return (
-                            <div key={section.key} className="bg-[#141414] border border-gray-800 rounded overflow-hidden">
-                                <div className="flex items-center justify-between px-3 py-2 bg-[#202020]">
-                                    <button onClick={() => libVM.toggleSetQualityExpanded(setRecord.id, section.key)} className="text-sm font-bold text-white">{section.label}</button>
-                                    <div className="flex items-center gap-2">
-                                        <button onClick={() => libVM.toggleSetQualityEnabled(setRecord.id, section.key)} className={`text-[10px] px-2 py-1 rounded font-bold ${current.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'}`}>{current.enabled ? 'ON' : 'OFF'}</button>
-                                        <button onClick={() => libVM.toggleSetQualityExpanded(setRecord.id, section.key)} className="text-xs text-gray-400 w-6">{current.expanded ? '▼' : '▶'}</button>
-                                    </div>
-                                </div>
-                                {current.expanded && (
-                                    <div className="p-3 text-xs space-y-3">
-                                        {section.controls.map(([field, label, min, max, step]) => (
-                                            <div key={field} className="flex flex-col gap-1">
-                                                <div className="flex justify-between"><span className="text-gray-400">{label}</span><span>{fmt(current[field])}</span></div>
-                                                <input type="range" min={min} max={max} step={step} value={current[field]} onChange={(e) => libVM.updateSetQuality(setRecord.id, section.key, field, field === 'historySize' ? parseInt(e.target.value, 10) : parseFloat(e.target.value))} className="w-full slider-thumb" />
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
                 </div>
             );
         }
@@ -801,7 +797,7 @@
         function SetsTab({ libVM, previewEngine, uiVM, flipbookVM }) {
             const cfg = libVM.packConfig || {};
             const setCfg = (patch) => libVM.setPackConfig(prev => ({ ...prev, ...patch }));
-            const reorderEnabled = (cfg.sortBy || 'none') === 'none';
+            const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
             const gridColumns = Math.max(1, Math.min(12, Number(uiVM?.gridColumns ?? DEFAULT_SET_GRID_COLUMNS) || DEFAULT_SET_GRID_COLUMNS));
             const getExportStemPreview = (value) => {
                 const raw = String(value || '').trim();
@@ -810,113 +806,430 @@
                 return tokens.map((token) => token.charAt(0).toUpperCase() + token.slice(1)).join('') || 'TexturePack';
             };
             const getSetItemPreviewName = (setName, itemIndex) => `${getExportStemPreview(setName)}_${String(itemIndex + 1).padStart(2, '0')}_x<res>.png`;
-            const selectedSet = libVM.selectedSet || libVM.sets?.[0] || null;
             return (
                 <div className="flex flex-col h-full bg-[#111] p-6">
                     <div className="mb-6">
                         <h2 className="text-xl font-bold text-white">SETS</h2>
                     </div>
                     <div className="flex-1 overflow-y-auto">
-                        <div className="flex items-center justify-between gap-4 mb-4">
-                            <div className="flex flex-wrap gap-2">
-                                {(libVM.sets || []).map((setRecord) => (
-                                    <button key={setRecord.id} onClick={() => libVM.setSelectedSetId(setRecord.id)} className={`px-3 py-1.5 rounded text-[11px] font-bold border ${libVM.selectedSetId === setRecord.id ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#1a1a1a] border-gray-800 text-gray-300 hover:border-gray-700'}`}>
-                                        {setRecord.name}
-                                    </button>
-                                ))}
-                                <button onClick={() => libVM.createSet?.()} className="px-3 py-1.5 rounded text-[11px] font-bold border bg-[#1a2a1a] border-green-800 text-green-300 hover:bg-[#214021]">
-                                    + NEW SET
-                                </button>
-                            </div>
+                        <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 mb-6">
+                        <div className="text-[11px] font-bold text-gray-300 mb-3 uppercase tracking-wide">Pack Sorting Config</div>
+                        <div className="flex justify-end mb-3 gap-2">
                             <button onClick={() => libVM.deleteAllSets?.()} disabled={libVM.exportingSetId !== null || (libVM.items || []).length === 0} className={`text-[10px] px-3 py-1.5 rounded font-bold border ${libVM.exportingSetId !== null || (libVM.items || []).length === 0 ? 'bg-[#171717] border-gray-800 text-gray-600 cursor-not-allowed' : 'bg-[#2a1515] border-red-900 text-red-300 hover:bg-red-700/50 hover:text-white'}`}>
-                                CLEAR WORKSPACE
+                                DELETE ALL SETS
+                            </button>
+                            <button onClick={() => libVM.reorganizePacks?.()} className="text-[10px] px-3 py-1.5 rounded font-bold bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-200 border border-gray-700">
+                                REORGANIZE PACKS
                             </button>
                         </div>
-
-                        {selectedSet && (
-                            <div className="space-y-6">
-                                <div className="bg-[#1a1a1a] p-4 rounded-xl border border-gray-800">
-                                    <div className="flex justify-between items-start gap-4 mb-4 border-b border-gray-700 pb-3">
-                                        <div className="min-w-0">
-                                            <EditableSetName set={selectedSet} libVM={libVM} />
-                                            <div className="text-[10px] text-gray-500 font-mono mt-1 truncate">
-                                                {`${getExportStemPreview(selectedSet.name)}_01_x<res>.png`}
-                                            </div>
-                                            <div className="text-[10px] text-gray-500 font-mono mt-1">
-                                                {selectedSet.items.length} items | fail route: {libVM.getSetNameById(selectedSet.failTargetSetId)}
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <button onClick={() => libVM.deleteSet(selectedSet)} disabled={libVM.exportingSetId !== null || !!selectedSet.system} className={`text-[10px] px-3 py-1.5 rounded font-bold transition-colors ${libVM.exportingSetId !== null || !!selectedSet.system ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-200'}`}>
-                                                DELETE SET
-                                            </button>
-                                            <button onClick={() => libVM.exportSet(selectedSet)} disabled={libVM.exportingSetId !== null || selectedSet.items.length === 0} className={`text-[10px] px-3 py-1.5 rounded font-bold transition-colors ${libVM.exportingSetId === selectedSet.id ? 'bg-gray-600 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}>
-                                                {libVM.exportingSetId === selectedSet.id ? 'PACKING...' : '⬇ DOWNLOAD SET'}
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {(libVM.exportingSetId === selectedSet.id && libVM.exportPhase) && (
-                                        <div className="text-[10px] text-blue-300 mb-3 font-mono">{libVM.exportPhase}</div>
-                                    )}
-                                    {(libVM.exportingSetId === null && libVM.exportError) && (
-                                        <div className="text-[10px] text-red-400 mb-3 font-mono">{libVM.exportError}</div>
-                                    )}
-
-                                    <div className="grid grid-cols-3 gap-3 text-xs">
-                                        <div className="flex flex-col gap-1">
-                                            <label className="text-gray-400">Sort By</label>
-                                            <select value={cfg.sortBy || 'none'} onChange={(e) => setCfg({ sortBy: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
-                                                <option value="none">None</option>
-                                                <option value="name">Name</option>
-                                                <option value="density">Alpha Density</option>
-                                                <option value="simplicity">Simplicity</option>
-                                                <option value="circularity">Circularity</option>
-                                                <option value="squareness">Squareness</option>
-                                            </select>
-                                        </div>
-                                        <div className="flex flex-col gap-1">
-                                            <label className="text-gray-400">Direction</label>
-                                            <select value={cfg.sortDir || 'asc'} onChange={(e) => setCfg({ sortDir: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
-                                                <option value="asc">Ascending</option>
-                                                <option value="desc">Descending</option>
-                                            </select>
-                                        </div>
-                                        <div className="flex flex-col gap-1 text-xs">
-                                            <div className="flex justify-between"><label className="text-gray-400">Max Items Per Pack</label><span>{cfg.maxItemsPerPack || 50}</span></div>
-                                            <input type="range" min="1" max="200" step="1" value={cfg.maxItemsPerPack || 50} onChange={(e) => setCfg({ maxItemsPerPack: parseInt(e.target.value, 10) })} className="w-full slider-thumb" />
-                                        </div>
-                                    </div>
+                        <div className="grid grid-cols-4 gap-3 text-xs">
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-gray-400">Group By</label>
+                                    <select value={cfg.groupBy || 'prefix'} onChange={(e) => setCfg({ groupBy: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
+                                        <option value="prefix">Name Prefix</option>
+                                        <option value="shape_variant">Shape + Variant</option>
+                                        <option value="full">Full Name</option>
+                                        <option value="volume_fill">Volume Fill</option>
+                                    </select>
                                 </div>
-
-                                <SetQualityPanel setRecord={selectedSet} libVM={libVM} />
-
-                                <div className="bg-[#1a1a1a] p-4 rounded-xl border border-gray-800">
-                                    <div className="text-[11px] font-bold text-gray-300 mb-3 uppercase tracking-wide">Set Contents</div>
-                                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }}>
-                                        {selectedSet.items.map((it, idx) => (
-                                            <VirtualizedTextureItem
-                                                key={it.id}
-                                                item={it}
-                                                displayName={getSetItemPreviewName(selectedSet.name, idx)}
-                                                engine={previewEngine}
-                                                onClick={libVM.onLoad}
-                                                onDelete={() => libVM.onDelete(it.id)}
-                                                flipFrames={16}
-                                                flipbookConfig={flipbookVM?.config}
-                                                autoAnimate={uiVM?.autoAnimateFrames}
-                                                maskViewMode={uiVM?.maskViewMode}
-                                                dragEnabled={reorderEnabled}
-                                                onReorder={libVM.reorderByDrag}
-                                                onSendToFront={reorderEnabled ? libVM.sendToFront : null}
-                                                onSendToBack={reorderEnabled ? libVM.sendToBack : null}
-                                            />
-                                        ))}
-                                    </div>
-                                    {selectedSet.items.length === 0 && <div className="text-xs text-gray-500 font-mono">This set is empty.</div>}
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-gray-400">Sort By</label>
+                                    <select value={cfg.sortBy || 'none'} onChange={(e) => setCfg({ sortBy: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
+                                        <option value="none">None</option>
+                                        <option value="name">Name</option>
+                                        <option value="density">Alpha Density</option>
+                                        <option value="simplicity">Simplicity</option>
+                                        <option value="circularity">Circularity</option>
+                                        <option value="squareness">Squareness</option>
+                                    </select>
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-gray-400">Direction</label>
+                                    <select value={cfg.sortDir || 'asc'} onChange={(e) => setCfg({ sortDir: e.target.value })} className="bg-[#333] border border-gray-600 rounded p-1 text-white">
+                                        <option value="asc">Ascending</option>
+                                        <option value="desc">Descending</option>
+                                    </select>
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-gray-400">Sets</label>
+                                    <div className="bg-[#252525] border border-gray-700 rounded p-1.5 text-gray-300">{libVM.sets.length}</div>
                                 </div>
                             </div>
-                        )}
+                            <div className="grid grid-cols-2 gap-4 mt-4">
+                                <div className="flex flex-col gap-1 text-xs">
+                                    <div className="flex justify-between"><label className="text-gray-400">Max Items Per Pack</label><span>{cfg.maxItemsPerPack || 50}</span></div>
+                                    <input type="range" min="1" max="200" step="1" value={cfg.maxItemsPerPack || 50} onChange={(e) => setCfg({ maxItemsPerPack: parseInt(e.target.value) })} className="w-full slider-thumb" />
+                                </div>
+                                <div className="flex flex-col gap-1 text-xs">
+                                    <div className="flex justify-between"><label className="text-gray-400">Prefix Group Depth</label><span>{cfg.groupDepth || 2}</span></div>
+                                    <input type="range" min="1" max="6" step="1" value={cfg.groupDepth || 2} onChange={(e) => setCfg({ groupDepth: parseInt(e.target.value) })} className="w-full slider-thumb" />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="space-y-8">{libVM.sets.map(set => (
+                            <div key={set.id} className="bg-[#1a1a1a] p-4 rounded-xl border border-gray-800">
+                                <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                                    <div className="min-w-0">
+                                        <EditableSetName set={set} libVM={libVM} />
+                                        <div className="text-[10px] text-gray-500 font-mono mt-1 truncate">
+                                            {`${getExportStemPreview(set.name)}_01_x<res>.png`}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => libVM.deleteSet(set)} disabled={libVM.exportingSetId !== null} className={`text-[10px] px-3 py-1.5 rounded font-bold transition-colors ${libVM.exportingSetId !== null ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-200'}`}>
+                                            DELETE SET
+                                        </button>
+                                        <button onClick={() => libVM.exportSet(set)} disabled={libVM.exportingSetId !== null} className={`text-[10px] px-3 py-1.5 rounded font-bold transition-colors ${libVM.exportingSetId === set.id ? 'bg-gray-600 cursor-wait' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}>
+                                            {libVM.exportingSetId === set.id ? 'PACKING...' : '⬇ DOWNLOAD FULL SET'}
+                                        </button>
+                                    </div>
+                                </div>
+                                {(libVM.exportingSetId === set.id && libVM.exportPhase) && (
+                                    <div className="text-[10px] text-blue-300 mb-3 font-mono">{libVM.exportPhase}</div>
+                                )}
+                                {(libVM.exportingSetId === null && libVM.exportError) && (
+                                    <div className="text-[10px] text-red-400 mb-3 font-mono">{libVM.exportError}</div>
+                                )}
+                                <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }}>
+	                                    {set.items.map((it, idx) => <VirtualizedTextureItem key={it.id} item={it} displayName={getSetItemPreviewName(set.name, idx)} engine={previewEngine} onClick={libVM.onLoad} onPreview={libVM.openInPreview} onDelete={() => libVM.onDelete(it.id)} flipFrames={16} flipbookConfig={flipbookVM?.config} autoAnimate={uiVM?.autoAnimateFrames} maskViewMode={uiVM?.maskViewMode} dragEnabled={reorderEnabled} onReorder={libVM.reorderByDrag} onSendToFront={reorderEnabled ? libVM.sendToFront : null} onSendToBack={reorderEnabled ? libVM.sendToBack : null} />)}
+	                                </div>
+	                            </div>
+	                        ))}</div>
+                    </div>
+                </div>
+            );
+        }
+
+        function PreviewEmptyState({ previewVM }) {
+            return (
+                <div className="h-full flex items-center justify-center">
+                    <div className="max-w-md border border-gray-800 rounded-xl bg-[#181818] p-6 text-center">
+                        <div className="text-lg font-bold text-white mb-2">Select A Source Texture</div>
+                        <div className="text-sm text-gray-400">Pick a saved texture from the source dropdown or use the `3D` action on a Factory or Sets card.</div>
+                        <div className="mt-4">
+                            <select value={previewVM.activeSourceId || ''} onChange={(e) => previewVM.selectSource(e.target.value || null)} className="w-full bg-[#232323] border border-gray-700 rounded px-3 py-2 text-sm text-white">
+                                <option value="">Choose a texture...</option>
+                                {previewVM.sourceItems.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function PreviewUnsupportedState() {
+            return (
+                <div className="h-full flex items-center justify-center">
+                    <div className="max-w-md border border-red-900/60 rounded-xl bg-[#181010] p-6 text-center">
+                        <div className="text-lg font-bold text-red-200 mb-2">Preview Requires WebGL2</div>
+                        <div className="text-sm text-red-100/70">This browser or GPU context does not expose the features the preview runtime needs.</div>
+                    </div>
+                </div>
+            );
+        }
+
+        function PreviewLayerList({ previewVM }) {
+            const preset = previewVM.activePreset;
+            if (!preset) return null;
+            return (
+                <div className="h-full flex flex-col bg-[#161616] border-r border-gray-800">
+                    <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+                        <div className="text-sm font-bold text-white">Layers</div>
+                        <button onClick={() => previewVM.addLayer()} className="text-[10px] px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold">ADD</button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                        {preset.layers.map((layer, idx) => (
+                            <div key={layer.id} onClick={() => previewVM.selectLayer(layer.id)} className={`w-full text-left rounded border p-3 cursor-pointer ${previewVM.selectedLayerId === layer.id ? 'border-blue-500 bg-[#1a2332]' : 'border-gray-800 bg-[#1b1b1b]'}`}>
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="min-w-0">
+                                        <div className="text-sm text-white font-bold truncate">{layer.name}</div>
+                                        <div className="text-[10px] text-gray-500">{layer.maxParticles} particles</div>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <button onClick={(e) => { e.stopPropagation(); previewVM.updateLayerSection(layer.id, 'root', { enabled: !layer.enabled }); }} className={`text-[10px] px-2 py-1 rounded ${layer.enabled ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}>{layer.enabled ? 'ON' : 'OFF'}</button>
+                                        <button onClick={(e) => { e.stopPropagation(); previewVM.reorderLayer(layer.id, -1); }} disabled={idx === 0} className="text-xs px-2 py-1 rounded bg-[#262626] text-gray-300 disabled:text-gray-600">▲</button>
+                                        <button onClick={(e) => { e.stopPropagation(); previewVM.reorderLayer(layer.id, 1); }} disabled={idx === preset.layers.length - 1} className="text-xs px-2 py-1 rounded bg-[#262626] text-gray-300 disabled:text-gray-600">▼</button>
+                                        <button onClick={(e) => { e.stopPropagation(); previewVM.duplicateLayer(layer.id); }} className="text-[10px] px-2 py-1 rounded bg-[#2f2f2f] text-gray-200">COPY</button>
+                                        <button onClick={(e) => { e.stopPropagation(); previewVM.deleteLayer(layer.id); }} className="text-[10px] px-2 py-1 rounded bg-[#311919] text-red-300">DEL</button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        function PreviewField({ label, children }) {
+            return (
+                <div className="flex flex-col gap-1">
+                    <label className="text-[11px] text-gray-400">{label}</label>
+                    {children}
+                </div>
+            );
+        }
+
+        function PreviewVec3Editor({ label, value, onChange, step = 0.01 }) {
+            return (
+                <PreviewField label={label}>
+                    <div className="grid grid-cols-3 gap-2">
+                        {value.map((entry, index) => (
+                            <input key={index} type="number" step={step} value={entry} onChange={(e) => onChange(value.map((item, itemIndex) => itemIndex === index ? parseFloat(e.target.value || 0) : item))} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" />
+                        ))}
+                    </div>
+                </PreviewField>
+            );
+        }
+
+        function PreviewRangeEditor({ label, value, onChange, step = 0.01 }) {
+            return (
+                <PreviewField label={label}>
+                    <div className="grid grid-cols-2 gap-2">
+                        <input type="number" step={step} value={value[0]} onChange={(e) => onChange([parseFloat(e.target.value || 0), value[1]])} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" />
+                        <input type="number" step={step} value={value[1]} onChange={(e) => onChange([value[0], parseFloat(e.target.value || 0)])} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" />
+                    </div>
+                </PreviewField>
+            );
+        }
+
+        function PreviewJsonEditor({ previewVM }) {
+            return (
+                <div className="border border-gray-800 rounded bg-[#161616] overflow-hidden">
+                    <div className="px-3 py-2 border-b border-gray-800 flex items-center justify-between">
+                        <div className="text-sm font-bold text-white">Preset JSON</div>
+                        <div className="flex gap-2">
+                            <button onClick={() => previewVM.resetJsonDraft()} className="text-[10px] px-2 py-1 rounded bg-[#2f2f2f] text-gray-200 font-bold">RESET</button>
+                            <button onClick={() => previewVM.applyJsonDraft(previewVM.jsonDraft)} className="text-[10px] px-2 py-1 rounded bg-blue-600 text-white font-bold">APPLY</button>
+                        </div>
+                    </div>
+                    {previewVM.jsonError && <div className="px-3 py-2 text-xs text-red-300 whitespace-pre-wrap border-b border-red-950/60 bg-[#240f12]">{previewVM.jsonError}</div>}
+                    <textarea value={previewVM.jsonDraft} onChange={(e) => previewVM.setJsonDraft(e.target.value)} className="w-full h-[260px] bg-[#101010] text-gray-200 text-xs font-mono p-3 outline-none resize-none" spellCheck={false} />
+                </div>
+            );
+        }
+
+        const PREVIEW_MODULE_META = [
+            { key: 'main', label: 'Main', subtitle: 'scene + runtime' },
+            { key: 'emission', label: 'Emission', subtitle: 'emit rate and bursts' },
+            { key: 'shape', label: 'Shape', subtitle: 'spawn area and direction' },
+            { key: 'velocityOverLifetime', label: 'Velocity Over Lifetime', subtitle: 'gravity and drag' },
+            { key: 'forceOverLifetime', label: 'Force Over Lifetime', subtitle: 'vortex and radial forces' },
+            { key: 'limitVelocityOverLifetime', label: 'Limit Velocity Over Lifetime', subtitle: 'speed clamp' },
+            { key: 'noise', label: 'Noise', subtitle: 'simulation variation' },
+            { key: 'colorOverLifetime', label: 'Color Over Lifetime', subtitle: 'gradient tint' },
+            { key: 'colorBySpeed', label: 'Color By Speed', subtitle: 'speed-based tint' },
+            { key: 'sizeOverLifetime', label: 'Size Over Lifetime', subtitle: 'size curve' },
+            { key: 'sizeBySpeed', label: 'Size By Speed', subtitle: 'speed-based scale' },
+            { key: 'rotationOverLifetime', label: 'Rotation Over Lifetime', subtitle: 'spin curve' },
+            { key: 'rotationBySpeed', label: 'Rotation By Speed', subtitle: 'speed-based spin' },
+            { key: 'collision', label: 'Collision', subtitle: 'world collision settings' },
+            { key: 'subEmitters', label: 'Sub Emitters', subtitle: 'spawn child particles' },
+            { key: 'textureSheetAnimation', label: 'Texture Sheet Animation', subtitle: 'sprite sheet playback' },
+            { key: 'inheritVelocity', label: 'Inherit Velocity', subtitle: 'carry emitter motion' },
+            { key: 'lifetimeByEmitterSpeed', label: 'Lifetime By Emitter Speed', subtitle: 'lifetime from emission speed' },
+            { key: 'trails', label: 'Trails', subtitle: 'particle trails' },
+            { key: 'customData', label: 'Custom Data', subtitle: 'custom payload channels' },
+            { key: 'renderer', label: 'Renderer', subtitle: 'render mode and sprite map' }
+        ];
+
+        function PreviewModuleCard({ title, subtitle, expanded, enabled, onToggleExpanded, onToggleEnabled, children, mode, onModeChange, modes = [] }) {
+            return (
+                <div className="border border-gray-800 rounded bg-[#161616] overflow-hidden">
+                    <button onClick={onToggleExpanded} className="w-full px-3 py-2 flex items-center justify-between text-left bg-[#181818] border-b border-gray-800">
+                        <div className="min-w-0">
+                            <div className="text-sm font-bold text-white">{title}</div>
+                            <div className="text-[10px] text-gray-500 uppercase tracking-wide">{subtitle}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {modes.length > 0 && (
+                                <select value={mode} onChange={(e) => onModeChange?.(e.target.value)} onClick={(e) => e.stopPropagation()} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-[10px] text-white">
+                                    {modes.map((item) => <option key={item} value={item}>{item}</option>)}
+                                </select>
+                            )}
+                            <button onClick={(e) => { e.stopPropagation(); onToggleEnabled?.(); }} className={`text-[10px] px-2 py-1 rounded font-bold ${enabled ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}>{enabled ? 'ON' : 'OFF'}</button>
+                            <span className="text-gray-500 text-xs">{expanded ? '▲' : '▼'}</span>
+                        </div>
+                    </button>
+                    {expanded && <div className="p-3 space-y-3">{children}</div>}
+                </div>
+            );
+        }
+
+        function PreviewModuleEditor({ previewVM, layer, moduleKey }) {
+            const module = layer.modules?.[moduleKey] || createDefaultPreviewModules()[moduleKey];
+            const updateModule = (modulePatch = {}, flatPatch = {}) => {
+                const nextModules = {
+                    ...(layer.modules || createDefaultPreviewModules()),
+                    [moduleKey]: {
+                        ...module,
+                        ...modulePatch,
+                        settings: { ...(module.settings || {}), ...(modulePatch.settings || {}) }
+                    }
+                };
+                previewVM.updateLayerSection(layer.id, 'root', { modules: nextModules, ...flatPatch });
+            };
+            const boolRow = (label, value, setter) => (
+                <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-gray-300">{label}</span>
+                    <button onClick={setter} className={`text-[10px] px-2 py-1 rounded font-bold ${value ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}>{value ? 'ON' : 'OFF'}</button>
+                </div>
+            );
+            switch (moduleKey) {
+                case 'main':
+                    return (
+                        <div className="space-y-3">
+                            <PreviewField label="Background"><input type="color" value={previewVM.activePreset.scene.background} onChange={(e) => previewVM.updateSceneField('background', e.target.value)} className="w-full h-9 bg-transparent border border-gray-700 rounded" /></PreviewField>
+                            <div className="grid grid-cols-2 gap-3">
+                                <PreviewField label="Camera FOV"><input type="number" value={previewVM.activePreset.scene.cameraFov} onChange={(e) => previewVM.updateSceneField('cameraFov', parseFloat(e.target.value || 45))} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField>
+                                <PreviewField label="Distance"><input type="number" value={previewVM.activePreset.scene.cameraDistance} onChange={(e) => previewVM.updateSceneField('cameraDistance', parseFloat(e.target.value || 6))} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField>
+                                <PreviewField label="Pitch"><input type="number" value={previewVM.activePreset.scene.cameraPitch} onChange={(e) => previewVM.updateSceneField('cameraPitch', parseFloat(e.target.value || 18))} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField>
+                                <PreviewField label="Yaw"><input type="number" value={previewVM.activePreset.scene.cameraYaw} onChange={(e) => previewVM.updateSceneField('cameraYaw', parseFloat(e.target.value || 24))} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField>
+                            </div>
+                            {boolRow('Loop', previewVM.activePreset.scene.loop, () => previewVM.updateSceneField('loop', !previewVM.activePreset.scene.loop))}
+                        </div>
+                    );
+                case 'emission':
+                    return (
+                        <div className="space-y-3">
+                            {boolRow('Enabled', module.enabled, () => updateModule({ enabled: !module.enabled }))}
+                            <PreviewField label="Mode"><select value={module.mode || 'continuous'} onChange={(e) => updateModule({ mode: e.target.value })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white"><option value="continuous">continuous</option><option value="burst">burst</option></select></PreviewField>
+                            <div className="grid grid-cols-2 gap-3">
+                                <PreviewField label="Rate"><input type="number" value={module.settings.rate} onChange={(e) => updateModule({ settings: { rate: parseFloat(e.target.value || 0) } }, { emitter: { rate: parseFloat(e.target.value || 0) } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField>
+                                <PreviewField label="Burst"><input type="number" value={module.settings.burst} onChange={(e) => updateModule({ settings: { burst: parseFloat(e.target.value || 0) } }, { emitter: { burst: parseFloat(e.target.value || 0) } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField>
+                            </div>
+                            {boolRow('Loop', module.settings.loop, () => updateModule({ settings: { loop: !module.settings.loop } }, { emitter: { loop: !module.settings.loop } }))}
+                            <PreviewField label="Duration"><input type="number" value={module.settings.duration} onChange={(e) => updateModule({ settings: { duration: parseFloat(e.target.value || 0) } }, { emitter: { duration: parseFloat(e.target.value || 0) } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField>
+                        </div>
+                    );
+                case 'shape':
+                    return (
+                        <div className="space-y-3">
+                            {boolRow('Enabled', module.enabled, () => updateModule({ enabled: !module.enabled }))}
+                            <PreviewField label="Mode"><select value={module.mode || 'cone'} onChange={(e) => updateModule({ mode: e.target.value, settings: { shape: e.target.value } }, { emitter: { shape: e.target.value } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white">{PREVIEW_EMITTER_SHAPES.map((shape) => <option key={shape} value={shape}>{shape}</option>)}</select></PreviewField>
+                            <PreviewVec3Editor label="Position" value={module.settings.position} onChange={(value) => updateModule({ settings: { position: value } }, { emitter: { position: value } })} />
+                            <PreviewVec3Editor label="Rotation" value={module.settings.rotation} onChange={(value) => updateModule({ settings: { rotation: value } }, { emitter: { rotation: value } })} />
+                            <PreviewVec3Editor label="Size" value={module.settings.size} onChange={(value) => updateModule({ settings: { size: value } }, { emitter: { size: value } })} />
+                            <PreviewVec3Editor label="Direction" value={module.settings.direction} onChange={(value) => updateModule({ settings: { direction: value } }, { emitter: { direction: value } })} />
+                            <PreviewField label="Spread"><input type="number" step="0.01" value={module.settings.spread} onChange={(e) => updateModule({ settings: { spread: parseFloat(e.target.value || 0) } }, { emitter: { spread: parseFloat(e.target.value || 0) } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField>
+                        </div>
+                    );
+                case 'velocityOverLifetime':
+                    return <div className="space-y-3">{boolRow('Enabled', module.enabled, () => updateModule({ enabled: !module.enabled }))}<PreviewVec3Editor label="Gravity" value={module.settings.gravity} onChange={(value) => updateModule({ settings: { gravity: value } }, { simulation: { gravity: value } })} /><PreviewField label="Drag"><input type="number" step="0.01" value={module.settings.drag} onChange={(e) => updateModule({ settings: { drag: parseFloat(e.target.value || 0) } }, { simulation: { drag: parseFloat(e.target.value || 0) } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField></div>;
+                case 'forceOverLifetime':
+                    return <div className="space-y-3">{boolRow('Enabled', module.enabled, () => updateModule({ enabled: !module.enabled }))}<div className="grid grid-cols-2 gap-3"><PreviewField label="Vortex Strength"><input type="number" step="0.01" value={module.settings.vortexStrength} onChange={(e) => updateModule({ settings: { vortexStrength: parseFloat(e.target.value || 0) } }, { simulation: { vortexStrength: parseFloat(e.target.value || 0) } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField><PreviewField label="Radial Attraction"><input type="number" step="0.01" value={module.settings.radialAttraction} onChange={(e) => updateModule({ settings: { radialAttraction: parseFloat(e.target.value || 0) } }, { simulation: { radialAttraction: parseFloat(e.target.value || 0) } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField></div></div>;
+                case 'limitVelocityOverLifetime':
+                    return <div className="space-y-3">{boolRow('Enabled', module.enabled, () => updateModule({ enabled: !module.enabled }))}<PreviewField label="Speed Limit"><input type="number" step="0.01" value={module.settings.speedLimit} onChange={(e) => updateModule({ settings: { speedLimit: parseFloat(e.target.value || 0) } }, { simulation: { speedLimit: parseFloat(e.target.value || 0) } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField></div>;
+                case 'noise':
+                    return <div className="space-y-3">{boolRow('Enabled', module.enabled, () => updateModule({ enabled: !module.enabled }))}<div className="grid grid-cols-2 gap-3"><PreviewField label="Noise Strength"><input type="number" step="0.01" value={module.settings.noiseStrength} onChange={(e) => updateModule({ settings: { noiseStrength: parseFloat(e.target.value || 0) } }, { simulation: { noiseStrength: parseFloat(e.target.value || 0) } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField><PreviewField label="Noise Scale"><input type="number" step="0.01" value={module.settings.noiseScale} onChange={(e) => updateModule({ settings: { noiseScale: parseFloat(e.target.value || 0) } }, { simulation: { noiseScale: parseFloat(e.target.value || 0) } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField></div></div>;
+                case 'colorOverLifetime':
+                    return <div className="space-y-3">{boolRow('Enabled', module.enabled, () => updateModule({ enabled: !module.enabled }))}<div className="grid grid-cols-2 gap-3"><PreviewField label="Color Start"><input type="color" value={module.settings.colorStart} onChange={(e) => updateModule({ settings: { colorStart: e.target.value } }, { particle: { colorStart: e.target.value } })} className="w-full h-9 bg-transparent border border-gray-700 rounded" /></PreviewField><PreviewField label="Color End"><input type="color" value={module.settings.colorEnd} onChange={(e) => updateModule({ settings: { colorEnd: e.target.value } }, { particle: { colorEnd: e.target.value } })} className="w-full h-9 bg-transparent border border-gray-700 rounded" /></PreviewField></div></div>;
+                case 'sizeOverLifetime':
+                    return <div className="space-y-3">{boolRow('Enabled', module.enabled, () => updateModule({ enabled: !module.enabled }))}<PreviewRangeEditor label="Size Range" value={module.settings.size} onChange={(value) => updateModule({ settings: { size: value } }, { particle: { size: value } })} /></div>;
+                case 'rotationOverLifetime':
+                    return <div className="space-y-3">{boolRow('Enabled', module.enabled, () => updateModule({ enabled: !module.enabled }))}<PreviewRangeEditor label="Spin Range" value={module.settings.spin} onChange={(value) => updateModule({ settings: { spin: value } }, { particle: { spin: value } })} /></div>;
+                case 'renderer':
+                    return <div className="space-y-3">{boolRow('Enabled', module.enabled, () => updateModule({ enabled: !module.enabled }))}<div className="grid grid-cols-2 gap-3"><PreviewField label="Blend"><select value={module.settings.blend} onChange={(e) => updateModule({ settings: { blend: e.target.value } }, { render: { blend: e.target.value } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white">{PREVIEW_BLEND_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></PreviewField><PreviewField label="Billboard"><select value={module.settings.billboard} onChange={(e) => updateModule({ settings: { billboard: e.target.value } }, { render: { billboard: e.target.value } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white">{PREVIEW_BILLBOARD_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></PreviewField><PreviewField label="Alpha Clip"><input type="number" step="0.001" value={module.settings.alphaClip} onChange={(e) => updateModule({ settings: { alphaClip: parseFloat(e.target.value || 0) } }, { render: { alphaClip: parseFloat(e.target.value || 0) } })} className="bg-[#232323] border border-gray-700 rounded px-2 py-1 text-xs text-white" /></PreviewField></div><PreviewVec3Editor label="Alpha Over Life" value={module.settings.alphaOverLife} onChange={(value) => updateModule({ settings: { alphaOverLife: value } }, { render: { alphaOverLife: value } })} /><PreviewVec3Editor label="Size Over Life" value={module.settings.sizeOverLife} onChange={(value) => updateModule({ settings: { sizeOverLife: value } }, { render: { sizeOverLife: value } })} /></div>;
+                default:
+                    return <div className="text-xs text-gray-400">No module editor yet.</div>;
+            }
+        }
+
+        function PreviewInspector({ previewVM }) {
+            const preset = previewVM.activePreset;
+            const layer = previewVM.selectedLayer;
+            if (!preset || !layer) return null;
+            return (
+                <div className="h-full overflow-y-auto p-4 space-y-3 bg-[#121212]">
+                    {PREVIEW_MODULE_META.map((meta) => (
+                        <PreviewModuleCard
+                            key={meta.key}
+                            title={meta.label}
+                            subtitle={meta.subtitle}
+                            expanded={!!layer.modules?.[meta.key]?.expanded}
+                            enabled={layer.modules?.[meta.key]?.enabled !== false}
+                            mode={layer.modules?.[meta.key]?.mode || ''}
+                            modes={meta.key === 'emission' ? ['continuous', 'burst'] : meta.key === 'shape' ? PREVIEW_EMITTER_SHAPES : meta.key === 'renderer' ? PREVIEW_BLEND_MODES : []}
+                            onToggleExpanded={() => previewVM.updateLayerSection(layer.id, 'root', {
+                                modules: {
+                                    ...(layer.modules || createDefaultPreviewModules()),
+                                    [meta.key]: {
+                                        ...(layer.modules?.[meta.key] || createDefaultPreviewModules()[meta.key]),
+                                        expanded: !layer.modules?.[meta.key]?.expanded
+                                    }
+                                }
+                            })}
+                            onToggleEnabled={() => previewVM.updateLayerSection(layer.id, 'root', {
+                                modules: {
+                                    ...(layer.modules || createDefaultPreviewModules()),
+                                    [meta.key]: {
+                                        ...(layer.modules?.[meta.key] || createDefaultPreviewModules()[meta.key]),
+                                        enabled: !(layer.modules?.[meta.key]?.enabled !== false)
+                                    }
+                                }
+                            })}
+                            onModeChange={(nextMode) => previewVM.updateLayerSection(layer.id, 'root', {
+                                modules: {
+                                    ...(layer.modules || createDefaultPreviewModules()),
+                                    [meta.key]: {
+                                        ...(layer.modules?.[meta.key] || createDefaultPreviewModules()[meta.key]),
+                                        mode: nextMode
+                                    }
+                                }
+                            })}
+                        >
+                            <PreviewModuleEditor previewVM={previewVM} layer={layer} moduleKey={meta.key} />
+                        </PreviewModuleCard>
+                    ))}
+                    <PreviewJsonEditor previewVM={previewVM} />
+                </div>
+            );
+        }
+
+        function PreviewTab({ previewVM }) {
+            const canvasRef = useRef(null);
+            useEffect(() => {
+                if (canvasRef.current) previewVM.setCanvasHost(canvasRef.current);
+                return () => previewVM.setCanvasHost(null);
+            }, [previewVM]);
+            if (!previewVM.supported) return <PreviewUnsupportedState />;
+            const invalidPreset = previewVM.status === 'invalid_preset';
+            const sourceMissing = !previewVM.activeSourceItem;
+            return (
+                <div className="h-full grid grid-rows-[auto,1fr] bg-[#0e0e0e]">
+                    <div className="px-4 py-3 border-b border-gray-800 bg-[#151515] flex items-center gap-3 flex-wrap">
+                        <select value={previewVM.activeSourceId || ''} onChange={(e) => previewVM.selectSource(e.target.value || null)} className="bg-[#232323] border border-gray-700 rounded px-3 py-2 text-xs text-white min-w-[220px]">
+                            <option value="">Select source texture...</option>
+                            {previewVM.sourceItems.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                        </select>
+                        <select value={previewVM.activePresetId || ''} onChange={(e) => previewVM.selectPreset(e.target.value)} className="bg-[#232323] border border-gray-700 rounded px-3 py-2 text-xs text-white min-w-[220px]">
+                            {previewVM.presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+                        </select>
+                        <button onClick={() => previewVM.createPreset()} className="text-[10px] px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold">NEW</button>
+                        <button onClick={() => previewVM.duplicatePreset()} className="text-[10px] px-3 py-2 rounded bg-[#2f2f2f] text-gray-100 font-bold">DUPLICATE</button>
+                        <button onClick={() => {
+                            const nextName = window.prompt('Rename preset', previewVM.activePreset?.name || '');
+                            if (nextName !== null) previewVM.renamePreset(previewVM.activePresetId, nextName);
+                        }} className="text-[10px] px-3 py-2 rounded bg-[#2f2f2f] text-gray-100 font-bold">RENAME</button>
+                        <button onClick={() => previewVM.deletePreset()} className="text-[10px] px-3 py-2 rounded bg-[#311919] text-red-300 font-bold">DELETE</button>
+                        <button onClick={() => previewVM.replaceWithDefault()} className="text-[10px] px-3 py-2 rounded bg-[#2f2f2f] text-gray-100 font-bold">RESET PRESET</button>
+                        <button onClick={() => previewVM.resetSimulation()} disabled={!previewVM.activeSourceItem || invalidPreset} className="text-[10px] px-3 py-2 rounded bg-[#2f2f2f] text-gray-100 font-bold disabled:opacity-40">RESET SIM</button>
+                        <button onClick={() => previewVM.setPlaying(!previewVM.isPlaying)} disabled={invalidPreset} className={`text-[10px] px-3 py-2 rounded font-bold ${previewVM.isPlaying ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-200'}`}>{previewVM.isPlaying ? 'PAUSE' : 'PLAY'}</button>
+                        <div className="min-w-[180px] flex items-center gap-2 ml-auto">
+                            <span className="text-[10px] text-gray-400 font-bold">TIME</span>
+                            <input type="range" min="0" max="3" step="0.01" value={previewVM.timeScale} onChange={(e) => previewVM.setTimeScale(parseFloat(e.target.value))} className="slider-thumb w-full" />
+                            <span className="text-[10px] text-gray-300 font-mono w-8 text-right">{previewVM.timeScale.toFixed(2)}</span>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-[320px,1fr,420px] min-h-0">
+                        <PreviewLayerList previewVM={previewVM} />
+                        <div className="relative min-h-0 bg-[#08090b]">
+                            <canvas ref={canvasRef} className="w-full h-full block preview-canvas-host" />
+                            {sourceMissing && <PreviewEmptyState previewVM={previewVM} />}
+                            <div className="absolute top-3 left-3 px-3 py-1.5 rounded bg-black/70 border border-gray-800 text-[10px] font-mono text-gray-200 uppercase">
+                                {previewVM.status.replace(/_/g, ' ')}
+                            </div>
+                        </div>
+                        <PreviewInspector previewVM={previewVM} />
                     </div>
                 </div>
             );
@@ -1206,14 +1519,15 @@ void main() {
             );
         }
 
-        function SettingsTab({ uiVM, dVM }) {
+        function SettingsTab({ uiVM, dVM, humanViewVM }) {
             return (
                 <div className="flex flex-col h-full bg-[#111] p-6">
                     <div className="mb-6">
                         <h2 className="text-xl font-bold text-white">SETTINGS</h2>
                         <p className="text-xs text-gray-400 mt-1">Global runtime and preview behavior.</p>
                     </div>
-                    <div className="max-w-xl bg-[#1a1a1a] border border-gray-800 rounded p-4 space-y-4">
+                    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,640px),minmax(0,1fr)] gap-6">
+                    <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 space-y-4">
 	                        <div className="flex items-center justify-between">
 	                            <div>
 	                                <div className="text-sm font-bold text-white">Auto Animated Frames</div>
@@ -1298,6 +1612,111 @@ void main() {
                                 <button onClick={() => dVM?.setParams(p => ({ ...p, resultFillMode: 'slot' }))} className={`text-[10px] px-3 py-1.5 rounded font-bold border ${dVM?.params?.resultFillMode === 'slot' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#2a2a2a] border-gray-700 text-gray-300'}`}>SLOT FILL</button>
                             </div>
                         </div>
+                    </div>
+                    <div className="bg-[#1a1a1a] border border-gray-800 rounded p-4 space-y-4">
+                        <div>
+                            <h3 className="text-sm font-bold text-white">Human View</h3>
+                            <p className="text-xs text-gray-400 mt-1">Local HTTP RPC companion for whole-app screenshots, browser inspection, and preview loops.</p>
+                        </div>
+                        <div className="flex flex-col gap-1 text-xs">
+                            <div className="flex justify-between text-gray-400">
+                                <span>Companion URL</span>
+                                <span>{humanViewVM?.health?.status || 'idle'}</span>
+                            </div>
+                            <input value={humanViewVM?.baseUrl || HUMAN_VIEW_DEFAULT_URL} onChange={(e) => humanViewVM?.setBaseUrl(e.target.value)} className="bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-xs text-white font-mono" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <button onClick={() => humanViewVM?.checkHealth()} className="text-[10px] px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold">CHECK HEALTH</button>
+                            <button onClick={() => humanViewVM?.startSession()} className="text-[10px] px-3 py-2 rounded bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-100 font-bold">START SESSION</button>
+                            <button onClick={() => humanViewVM?.openLocalApp()} className="text-[10px] px-3 py-2 rounded bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-100 font-bold">OPEN LOCAL APP</button>
+                            <button onClick={() => humanViewVM?.inspectConsole()} className="text-[10px] px-3 py-2 rounded bg-[#2f2f2f] hover:bg-[#3b3b3b] text-gray-100 font-bold">INSPECT CONSOLE</button>
+                            <button onClick={() => humanViewVM?.captureFullApp()} className="text-[10px] px-3 py-2 rounded bg-green-600 hover:bg-green-500 text-white font-bold">CAPTURE FULL APP</button>
+                            <button onClick={() => humanViewVM?.captureViewport()} className="text-[10px] px-3 py-2 rounded bg-green-700 hover:bg-green-600 text-white font-bold">CAPTURE VIEWPORT</button>
+                            <button onClick={() => humanViewVM?.runPreviewLoop()} className="text-[10px] px-3 py-2 rounded bg-violet-600 hover:bg-violet-500 text-white font-bold">RUN PREVIEW LOOP</button>
+                            <button onClick={() => humanViewVM?.stopLoop()} className="text-[10px] px-3 py-2 rounded bg-[#3a1818] hover:bg-red-700 text-red-200 font-bold">STOP LOOP</button>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 text-xs">
+                            <div className="bg-[#121212] border border-gray-800 rounded p-3">
+                                <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-2">Health</div>
+                                <div className="text-gray-300 font-mono break-all">status: {humanViewVM?.health?.status || 'idle'}</div>
+                                <div className="text-gray-400 font-mono break-all">active_url: {humanViewVM?.health?.active_url || '--'}</div>
+                                <div className="text-gray-400 font-mono">browser_ready: {humanViewVM?.health?.browser_ready ? 'true' : 'false'}</div>
+                                <div className="text-gray-400 font-mono">app_ready: {humanViewVM?.health?.app_ready ? 'true' : 'false'}</div>
+                            </div>
+                            <div className="bg-[#121212] border border-gray-800 rounded p-3">
+                                <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-2">Loop</div>
+                                <div className="text-gray-300 font-mono">running: {humanViewVM?.loopState?.running ? 'true' : 'false'}</div>
+                                <div className="text-gray-400 font-mono">iteration: {humanViewVM?.loopState?.iteration ?? 0}</div>
+                                <div className="text-gray-400 font-mono">verdict: {humanViewVM?.loopState?.last_verdict || '--'}</div>
+                                <button onClick={() => humanViewVM?.refreshLoopStatus()} className="mt-2 text-[10px] px-2 py-1 rounded bg-[#2a2a2a] border border-gray-700 text-gray-200 font-bold">REFRESH LOOP STATUS</button>
+                            </div>
+                            <div className="bg-[#121212] border border-gray-800 rounded p-3">
+                                <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-2">Latest Capture</div>
+                                <div className="text-gray-300 font-mono break-all">{humanViewVM?.latestCapture?.file_path || '--'}</div>
+                            </div>
+                            <div className="bg-[#121212] border border-gray-800 rounded p-3">
+                                <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-2">Last Error</div>
+                                <div className="text-red-300 font-mono whitespace-pre-wrap break-all">{humanViewVM?.lastError || humanViewVM?.health?.last_error || '--'}</div>
+                            </div>
+                            <div className="bg-[#121212] border border-gray-800 rounded p-3">
+                                <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-2">Console Tail</div>
+                                <div className="max-h-48 overflow-y-auto space-y-1">
+                                    {(humanViewVM?.consoleEntries || []).slice(-10).map((entry, idx) => (
+                                        <div key={`${entry.at || 'entry'}-${idx}`} className="text-[10px] text-gray-300 font-mono break-all">
+                                            [{entry.type}] {entry.text}
+                                        </div>
+                                    ))}
+                                    {(humanViewVM?.consoleEntries || []).length === 0 && <div className="text-[10px] text-gray-500 font-mono">No console entries loaded.</div>}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function IntegrationsTab() {
+            const [copyStatus, setCopyStatus] = useState('');
+            const handleCopyGuide = async () => {
+                try {
+                    const text = INTEGRATIONS_GUIDE_TEXT;
+                    await navigator.clipboard.writeText(text);
+                    const confirmed = await navigator.clipboard.readText().catch(() => '');
+                    if (confirmed === text) setCopyStatus('Copied to clipboard and verified');
+                    else setCopyStatus('Copy attempted; clipboard readback unavailable');
+                    window.setTimeout(() => setCopyStatus(''), 1800);
+                } catch (error) {
+                    try {
+                        const fallback = document.createElement('textarea');
+                        fallback.value = INTEGRATIONS_GUIDE_TEXT;
+                        fallback.style.position = 'fixed';
+                        fallback.style.opacity = '0';
+                        document.body.appendChild(fallback);
+                        fallback.focus();
+                        fallback.select();
+                        const copied = document.execCommand('copy');
+                        document.body.removeChild(fallback);
+                        setCopyStatus(copied ? 'Copied with fallback command' : `Copy failed: ${error?.message || 'clipboard unavailable'}`);
+                    } catch (fallbackError) {
+                        setCopyStatus(`Copy failed: ${fallbackError?.message || error?.message || 'clipboard unavailable'}`);
+                    }
+                }
+            };
+            return (
+                <div className="flex flex-col h-full bg-[#111] p-6 overflow-hidden">
+                    <div className="mb-6 flex items-start justify-between gap-4">
+                        <div>
+                            <h2 className="text-xl font-bold text-white">INTEGRATIONS</h2>
+                            <p className="text-xs text-gray-400 mt-1">Guide for the available human-view tools and how to use them.</p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                            <button onClick={handleCopyGuide} className="text-[10px] px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold">COPY GUIDE</button>
+                            {copyStatus && <div className="text-[10px] text-gray-400 font-mono">{copyStatus}</div>}
+                        </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto rounded border border-gray-800 bg-[#1a1a1a] p-4">
+                        <pre className="whitespace-pre-wrap text-xs leading-5 text-gray-200 font-mono">{INTEGRATIONS_GUIDE_TEXT}</pre>
                     </div>
                 </div>
             );
