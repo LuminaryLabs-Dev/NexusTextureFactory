@@ -7,171 +7,104 @@
             const [previewUrls, setPreviewUrls] = useState([]); const [finalPreviewUrl, setFinalPreviewUrl] = useState(null);
 	            const [customOperations, setCustomOperations] = useState([]);
             const [filterModules, setFilterModules] = useState(createDefaultFilterModules());
-            const createDefaultQualityFilters = useCallback(() => ({
+            const [qualityFilters, setQualityFilters] = useState({
                 alpha: { enabled: true, min: 0.05, max: 0.75, expanded: true },
                 similarity: { enabled: false, maxSimilarity: 0.9, historySize: 200, expanded: false },
                 shape: { enabled: false, minCircularity: 0.2, maxCircularity: 1.0, minSquareness: 0.2, maxSquareness: 1.0, expanded: false },
                 temporalChange: { enabled: true, minChange: 0.04, maxChange: 0.95, maxJitter: 0.2, expanded: true },
                 simplicity: { enabled: false, min: 0.1, max: 0.9, expanded: false }
-            }), []);
-            const mergeQualityFilters = useCallback((value) => {
-                const defaults = createDefaultQualityFilters();
-                const parsed = value && typeof value === 'object' ? value : {};
-                return {
-                    ...defaults,
-                    ...parsed,
-                    alpha: { ...defaults.alpha, ...(parsed.alpha || {}) },
-                    similarity: { ...defaults.similarity, ...(parsed.similarity || {}) },
-                    shape: { ...defaults.shape, ...(parsed.shape || {}) },
-                    temporalChange: { ...defaults.temporalChange, ...(parsed.temporalChange || {}) },
-                    simplicity: { ...defaults.simplicity, ...(parsed.simplicity || {}) }
-                };
-            }, [createDefaultQualityFilters]);
-            const [qualityFilters, setQualityFilters] = useState(() => createDefaultQualityFilters());
-            const normalizePackConfig = useCallback((value) => {
-                const parsed = value && typeof value === 'object' ? value : {};
-                return {
-                    groupBy: 'set',
-                    groupDepth: 1,
-                    maxItemsPerPack: Math.max(1, Math.min(200, parseInt(parsed.maxItemsPerPack || 50, 10) || 50)),
-                    sortBy: ['none', 'name', 'density', 'simplicity', 'circularity', 'squareness'].includes(parsed.sortBy) ? parsed.sortBy : 'none',
-                    sortDir: parsed.sortDir === 'desc' ? 'desc' : 'asc',
-                    setNameOverrides: {}
-                };
-            }, []);
-            const [packConfig, setPackConfig] = useState(() => normalizePackConfig({}));
+            });
+            const [packConfig, setPackConfig] = useState({
+                groupBy: 'volume_fill',
+                groupDepth: 2,
+                maxItemsPerPack: 50,
+                sortBy: 'none',
+                sortDir: 'asc',
+                setNameOverrides: {}
+            });
             const [flipbookConfig, setFlipbookConfig] = useState(createDefaultFlipbookConfig());
 	            const [dreamParams, setDreamParams] = useState({ overdrive: 0, generationWorkers: 5, packagingWorkers: 5, refineCycles: 1, minDensity: 0.15, maxDensity: 0.75, minSimplicity: 0.1, maxSimplicity: 0.9, varianceStrictness: 0.1, randStrength: 0.5, flipFrames: 16, prompt: "", minComplexity: 5, maxComplexity: 10, resultFillMode: 'slide' });
 
-		            const [isDreaming, setIsDreaming] = useState(false); const [dreamState, setDreamState] = useState({ results: [], rejectedIds: [], phase: '', rejectLabel: '', pendingAccepted: 0, pendingAttempts: 0, pendingRejected: 0, pendingBackfill: 0, activeGenWorkers: 0, activeBackfillWorkers: 0, stageRejects: { alpha: 0, simplicity: 0, shape: 0, similarity: 0, temporal: 0, other: 0 } });
+            const [isDreaming, setIsDreaming] = useState(false); const [dreamState, setDreamState] = useState({ results: [], rejectedIds: [], phase: '', rejectLabel: '', pendingAccepted: 0, pendingAttempts: 0, pendingRejected: 0, pendingBackfill: 0, activeGenWorkers: 0, activeBackfillWorkers: 0, stageRejects: { alpha: 0, simplicity: 0, shape: 0, similarity: 0, temporal: 0, other: 0 } });
             const [savedLibrary, setSavedLibrary] = useState([]); const [exportingSetId, setExportingSetId] = useState(null); const [exportPhase, setExportPhase] = useState(''); const [exportError, setExportError] = useState('');
-            const [savedSets, setSavedSets] = useState([]);
-            const [activeTargetSetId, setActiveTargetSetId] = useState(PRIMARY_SET_ID);
-            const [selectedSetId, setSelectedSetId] = useState(PRIMARY_SET_ID);
             const [deleteHistory, setDeleteHistory] = useState([]);
+            const [previewActiveSourceId, setPreviewActiveSourceId] = useState(null);
+            const [previewActivePresetId, setPreviewActivePresetId] = useState(PREVIEW_DEFAULT_PRESET_ID);
+            const [previewPresets, setPreviewPresets] = useState([createDefaultPreviewPreset()]);
+            const [previewIsPlaying, setPreviewIsPlaying] = useState(true);
+            const [previewTimeScale, setPreviewTimeScale] = useState(1);
+            const [previewRuntimeStatus, setPreviewRuntimeStatus] = useState(isPreviewWebGL2Supported() ? 'idle' : 'unsupported');
+            const [previewJsonDraft, setPreviewJsonDraft] = useState(JSON.stringify(createDefaultPreviewPreset(), null, 2));
+            const [previewJsonError, setPreviewJsonError] = useState('');
+            const [previewSelectedLayerId, setPreviewSelectedLayerId] = useState('layer-1');
+            const [previewExpandedModules, setPreviewExpandedModules] = useState({});
+            const [previewAdvancedPanels, setPreviewAdvancedPanels] = useState({});
+            const [toolkitBaseUrl, setToolkitBaseUrl] = useState(TOOLKIT_DEFAULT_URL);
+            const [toolkitHealth, setToolkitHealth] = useState({ status: 'idle', server_ready: false, toolkit_ready: false, last_error: '' });
+            const [toolkitCatalog, setToolkitCatalog] = useState([]);
+            const [toolkitLastRun, setToolkitLastRun] = useState(null);
+            const [toolkitLogs, setToolkitLogs] = useState([]);
+            const [toolkitLastError, setToolkitLastError] = useState('');
 	            const eR = useRef(null); const bER = useRef(null);
 	            const generationEnginesRef = useRef([]);
 	            const hasHydratedMetaRef = useRef(false);
 	            const savedLibraryRef = useRef(savedLibrary);
-	            const savedSetsRef = useRef(savedSets);
 	            const dreamResultsRef = useRef(dreamState.results);
 	            const deleteHistoryRef = useRef(deleteHistory);
 	            const persistTimerRef = useRef(null);
             const hydratedLibraryUrlsRef = useRef(new Map());
             const dreamRunIdRef = useRef(0);
             const dreamStopRequestedRef = useRef(false);
+            const previewRuntimeRef = useRef(null);
+            const previewCanvasRef = useRef(null);
+            const previewAnimationFrameRef = useRef(null);
+            const previewSourceLoadIdRef = useRef(0);
+            const toolkitBridgeRef = useRef(new ToolkitToolBridge(TOOLKIT_DEFAULT_URL));
+            const getPreviewLayerUiKey = useCallback((presetId, layerId) => `${String(presetId || 'preset')}::${String(layerId || 'layer')}`, []);
             const clampSetGridColumns = (value) => {
                 const parsed = Number.parseInt(value, 10);
                 if (!Number.isFinite(parsed)) return DEFAULT_SET_GRID_COLUMNS;
                 return Math.max(1, Math.min(12, parsed));
             };
-            const areSetRecordsEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-            const buildSetRecord = useCallback((name, options = {}) => ({
-                id: options.id || `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                name: String(name || 'Untitled Set').trim() || 'Untitled Set',
-                itemIds: Array.isArray(options.itemIds) ? [...options.itemIds] : [],
-                qualityFilters: mergeQualityFilters(options.qualityFilters),
-                evaluationStage: options.evaluationStage === 'disabled' ? 'disabled' : DEFAULT_SET_EVALUATION_STAGE,
-                failTargetSetId: options.failTargetSetId || null,
-                system: !!options.system
-            }), [mergeQualityFilters]);
-            const normalizeSavedSets = useCallback((records, libraryItems = savedLibraryRef.current || []) => {
-                const existingIds = new Set((libraryItems || []).map((item) => item.id));
-                const seenSetIds = new Set();
-                const claimedItemIds = new Set();
-                const next = [];
-                const appendSet = (candidate) => {
-                    const nextId = candidate?.id || `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                    if (seenSetIds.has(nextId)) return;
-                    seenSetIds.add(nextId);
-                    const merged = buildSetRecord(candidate?.name || 'Untitled Set', {
-                        ...candidate,
-                        id: nextId
-                    });
-                    const nextItemIds = [];
-                    (merged.itemIds || []).forEach((itemId) => {
-                        if (!existingIds.has(itemId) || claimedItemIds.has(itemId)) return;
-                        claimedItemIds.add(itemId);
-                        nextItemIds.push(itemId);
-                    });
-                    next.push({
-                        ...merged,
-                        itemIds: nextItemIds,
-                        system: merged.system || nextId === PRIMARY_SET_ID || nextId === REJECTS_SET_ID
-                    });
-                };
-
-                if (Array.isArray(records)) records.forEach((record) => appendSet(record));
-                if (!seenSetIds.has(PRIMARY_SET_ID)) {
-                    appendSet({
-                        id: PRIMARY_SET_ID,
-                        name: 'Volume 1',
-                        qualityFilters,
-                        evaluationStage: DEFAULT_SET_EVALUATION_STAGE,
-                        failTargetSetId: REJECTS_SET_ID,
-                        system: true
-                    });
-                }
-                if (!seenSetIds.has(REJECTS_SET_ID)) {
-                    appendSet({
-                        id: REJECTS_SET_ID,
-                        name: 'Rejects',
-                        qualityFilters,
-                        evaluationStage: 'disabled',
-                        failTargetSetId: null,
-                        system: true
-                    });
-                }
-
-                const unassignedIds = [...existingIds].filter((itemId) => !claimedItemIds.has(itemId));
-                if (unassignedIds.length > 0) {
-                    const primaryIndex = next.findIndex((set) => set.id === PRIMARY_SET_ID);
-                    if (primaryIndex >= 0) {
-                        next[primaryIndex] = {
-                            ...next[primaryIndex],
-                            itemIds: [...next[primaryIndex].itemIds, ...unassignedIds]
-                        };
-                    }
-                }
-
-                const validSetIds = new Set(next.map((set) => set.id));
-                return next.map((set) => {
-                    const isRejects = set.id === REJECTS_SET_ID;
-                    const failTargetValid = !!set.failTargetSetId && set.failTargetSetId !== set.id && validSetIds.has(set.failTargetSetId);
-                    return {
-                        ...set,
-                        qualityFilters: mergeQualityFilters(set.qualityFilters),
-                        evaluationStage: isRejects ? 'disabled' : (set.evaluationStage === 'disabled' ? 'disabled' : DEFAULT_SET_EVALUATION_STAGE),
-                        failTargetSetId: isRejects ? null : (failTargetValid ? set.failTargetSetId : REJECTS_SET_ID),
-                        system: set.system || isRejects || set.id === PRIMARY_SET_ID
-                    };
-                });
-            }, [buildSetRecord, mergeQualityFilters, qualityFilters]);
 
 	            useEffect(() => { eR.current = new TextureEngine(256, 256); bER.current = new TextureEngine(256, 256); }, []);
 	            useEffect(() => {
                 if (!eR.current) return;
-                eR.current.renderStack(steps);
-                const nextPreviewUrls = steps.map((_, i) => eR.current.getTextureUrl(i, { mode: maskViewMode }));
-                const nextFinalPreviewUrl = nextPreviewUrls[steps.length - 1] || null;
-                setPreviewUrls((prev) => {
-                    if (prev.length === nextPreviewUrls.length && prev.every((url, idx) => url === nextPreviewUrls[idx])) return prev;
-                    return nextPreviewUrls;
-                });
-                setFinalPreviewUrl((prev) => prev === nextFinalPreviewUrl ? prev : nextFinalPreviewUrl);
-                setSteps((prev) => {
-                    let changed = prev.length !== nextPreviewUrls.length;
-                    const next = prev.map((step, idx) => {
-                        const previewUrl = nextPreviewUrls[idx] || null;
-                        if (step.previewUrl === previewUrl) return step;
-                        changed = true;
-                        return { ...step, previewUrl };
+                try {
+                    eR.current.renderStack(steps);
+                    const nextPreviewUrls = steps.map((_, i) => eR.current.getTextureUrl(i, { mode: maskViewMode }));
+                    const nextFinalPreviewUrl = nextPreviewUrls[steps.length - 1] || null;
+                    setPreviewUrls((prev) => {
+                        if (prev.length === nextPreviewUrls.length && prev.every((url, idx) => url === nextPreviewUrls[idx])) return prev;
+                        return nextPreviewUrls;
                     });
-                    return changed ? next : prev;
-                });
+                    setFinalPreviewUrl((prev) => prev === nextFinalPreviewUrl ? prev : nextFinalPreviewUrl);
+                    setSteps((prev) => {
+                        let changed = prev.length !== nextPreviewUrls.length;
+                        const next = prev.map((step, idx) => {
+                            const previewUrl = nextPreviewUrls[idx] || null;
+                            if (step.previewUrl === previewUrl) return step;
+                            changed = true;
+                            return { ...step, previewUrl };
+                        });
+                        return changed ? next : prev;
+                    });
+                } catch (error) {
+                    console.error(error);
+                    setPreviewUrls((prev) => prev.length ? [] : prev);
+                    setFinalPreviewUrl((prev) => prev === null ? prev : null);
+                    setSteps((prev) => {
+                        let changed = false;
+                        const next = prev.map((step) => {
+                            if (!step.previewUrl) return step;
+                            changed = true;
+                            return { ...step, previewUrl: null };
+                        });
+                        return changed ? next : prev;
+                    });
+                }
             }, [steps, maskViewMode]);
 	            useEffect(() => { savedLibraryRef.current = savedLibrary; }, [savedLibrary]);
-	            useEffect(() => { savedSetsRef.current = savedSets; }, [savedSets]);
 	            useEffect(() => { dreamResultsRef.current = dreamState.results; }, [dreamState.results]);
 	            useEffect(() => { deleteHistoryRef.current = deleteHistory; }, [deleteHistory]);
             useEffect(() => () => {
@@ -248,69 +181,126 @@
                     return config.map((step) => hydrateStepDefaults(step));
                 }
 	            useEffect(() => {
-	                try {
-	                    const rawWorkspace = localStorage.getItem(V3_WORKSPACE_STORAGE_KEY);
-	                    if (rawWorkspace) {
-	                        const parsed = JSON.parse(rawWorkspace);
-	                        if (parsed && typeof parsed === 'object') {
-                                const hydratedLibrary = Array.isArray(parsed.library)
-                                    ? parsed.library.map((item) => ({ ...item, config: hydrateConfigDefaults(item?.config) }))
-                                    : [];
-	                            setSavedLibrary(hydratedLibrary);
-                                setSavedSets(normalizeSavedSets(parsed.sets, hydratedLibrary));
-                                if (Array.isArray(parsed.customOperations)) setCustomOperations(parsed.customOperations);
-                                if (Array.isArray(parsed.filterModules)) {
-                                    const defaultsById = new Map(createDefaultFilterModules().map((item) => [item.id, item]));
-                                    setFilterModules(parsed.filterModules.map((item) => {
-                                        const base = defaultsById.get(item.id) || createDefaultFilterModules().find((candidate) => candidate.key === item.key) || item;
-                                        return {
-                                            ...base,
-                                            ...item,
-                                            params: { ...(base.params || {}), ...(item.params || {}) },
-                                            universal: { ...(base.universal || {}), ...(item.universal || {}) }
-                                        };
-                                    }));
-                                }
-                                if (parsed.defaultQualityFilters && typeof parsed.defaultQualityFilters === 'object') {
-                                    setQualityFilters(mergeQualityFilters(parsed.defaultQualityFilters));
-                                }
-                                if (parsed.dreamParams && typeof parsed.dreamParams === 'object') {
-                                    const nextMinComplexity = Math.max(1, Math.min(20, parseInt(parsed.dreamParams.minComplexity ?? 5, 10)));
-                                    const nextMaxComplexity = Math.max(nextMinComplexity, Math.min(20, parseInt(parsed.dreamParams.maxComplexity ?? 10, 10)));
-                                    const nextOverdrive = Math.max(0, Math.min(1, Number(parsed.dreamParams.overdrive ?? 0)));
-                                    const nextResultFillMode = parsed.dreamParams.resultFillMode === 'slot' ? 'slot' : 'slide';
-                                    setDreamParams(prev => ({
-                                        ...prev,
-                                        ...parsed.dreamParams,
-                                        overdrive: nextOverdrive,
-                                        minComplexity: nextMinComplexity,
-                                        maxComplexity: nextMaxComplexity,
-                                        resultFillMode: nextResultFillMode
-                                    }));
-                                }
-                                if (parsed.uiPrefs && typeof parsed.uiPrefs === 'object') {
-                                    if (typeof parsed.uiPrefs.autoAnimateFrames === 'boolean') setAutoAnimateFrames(parsed.uiPrefs.autoAnimateFrames);
-                                    if (typeof parsed.uiPrefs.useWorkbenchSeed === 'boolean') setUseWorkbenchSeed(parsed.uiPrefs.useWorkbenchSeed);
-                                    if (parsed.uiPrefs.maskViewMode === 'bw' || parsed.uiPrefs.maskViewMode === 'transparent') setMaskViewMode(parsed.uiPrefs.maskViewMode);
-                                    setGridColumns(clampSetGridColumns(parsed.uiPrefs.gridColumns ?? DEFAULT_SET_GRID_COLUMNS));
-                                    if (typeof parsed.uiPrefs.activeTargetSetId === 'string') setActiveTargetSetId(parsed.uiPrefs.activeTargetSetId);
-                                    if (typeof parsed.uiPrefs.selectedSetId === 'string') setSelectedSetId(parsed.uiPrefs.selectedSetId);
-                                }
-                                if (parsed.packConfig && typeof parsed.packConfig === 'object') {
-                                    setPackConfig(normalizePackConfig(parsed.packConfig));
-                                }
-                                if (parsed.flipbookConfig) {
-                                    setFlipbookConfig(mergeFlipbookConfig(parsed.flipbookConfig));
-                                }
+                try {
+	                    const rawLibrary = localStorage.getItem(META_KEY_LIBRARY);
+	                    if (rawLibrary) {
+	                        const parsed = JSON.parse(rawLibrary);
+	                        if (Array.isArray(parsed)) setSavedLibrary(parsed.map((item) => ({ ...item, config: hydrateConfigDefaults(item?.config) })));
+	                    }
+	                    const rawCustomOps = localStorage.getItem(META_KEY_CUSTOM_OPS);
+	                    if (rawCustomOps) {
+	                        const parsed = JSON.parse(rawCustomOps);
+	                        if (Array.isArray(parsed)) setCustomOperations(parsed);
+	                    }
+	                    const rawFilterModules = localStorage.getItem(META_KEY_FILTER_MODULES);
+	                    if (rawFilterModules) {
+	                        const parsed = JSON.parse(rawFilterModules);
+	                        if (Array.isArray(parsed)) {
+                                const defaultsById = new Map(createDefaultFilterModules().map((item) => [item.id, item]));
+                                setFilterModules(parsed.map((item) => {
+                                    const base = defaultsById.get(item.id) || createDefaultFilterModules().find((candidate) => candidate.key === item.key) || item;
+                                    return {
+                                        ...base,
+                                        ...item,
+                                        params: { ...(base.params || {}), ...(item.params || {}) },
+                                        universal: { ...(base.universal || {}), ...(item.universal || {}) }
+                                    };
+                                }));
                             }
-	                    } else {
-                            setSavedSets(normalizeSavedSets([], []));
+	                    }
+                    const rawQuality = localStorage.getItem(META_KEY_QUALITY_FILTERS);
+                    if (rawQuality) {
+                        const parsed = JSON.parse(rawQuality);
+                        if (parsed && typeof parsed === 'object') {
+                            setQualityFilters(prev => ({
+                                ...prev,
+                                ...parsed,
+                                alpha: { ...prev.alpha, ...(parsed.alpha || {}) },
+                                similarity: { ...prev.similarity, ...(parsed.similarity || {}) },
+                                shape: { ...prev.shape, ...(parsed.shape || {}) },
+                                temporalChange: { ...prev.temporalChange, ...(parsed.temporalChange || {}) },
+                                simplicity: { ...prev.simplicity, ...(parsed.simplicity || {}) }
+                            }));
                         }
-                } catch (_) {
-                        setSavedSets(normalizeSavedSets([], []));
                     }
+                    const rawDreamParams = localStorage.getItem(META_KEY_DREAM_PARAMS);
+                    if (rawDreamParams) {
+                        const parsed = JSON.parse(rawDreamParams);
+                        if (parsed && typeof parsed === 'object') {
+                            const nextMinComplexity = Math.max(1, Math.min(20, parseInt(parsed.minComplexity ?? 5)));
+                            const nextMaxComplexity = Math.max(nextMinComplexity, Math.min(20, parseInt(parsed.maxComplexity ?? 10)));
+                            const nextOverdrive = Math.max(0, Math.min(1, Number(parsed.overdrive ?? 0)));
+                            const nextResultFillMode = parsed.resultFillMode === 'slot' ? 'slot' : 'slide';
+                            setDreamParams(prev => ({
+                                ...prev,
+                                ...parsed,
+                                overdrive: nextOverdrive,
+                                minComplexity: nextMinComplexity,
+                                maxComplexity: nextMaxComplexity,
+                                resultFillMode: nextResultFillMode
+                            }));
+                        }
+                    }
+	                    const rawUiPrefs = localStorage.getItem(META_KEY_UI_PREFS);
+	                    if (rawUiPrefs) {
+	                        const parsed = JSON.parse(rawUiPrefs);
+	                        if (parsed && typeof parsed === 'object') {
+	                            if (typeof parsed.autoAnimateFrames === 'boolean') setAutoAnimateFrames(parsed.autoAnimateFrames);
+                            if (typeof parsed.useWorkbenchSeed === 'boolean') setUseWorkbenchSeed(parsed.useWorkbenchSeed);
+                            if (parsed.maskViewMode === 'bw' || parsed.maskViewMode === 'transparent') setMaskViewMode(parsed.maskViewMode);
+                            setGridColumns(clampSetGridColumns(parsed.gridColumns ?? DEFAULT_SET_GRID_COLUMNS));
+	                        }
+	                    }
+                    const rawPackConfig = localStorage.getItem(META_KEY_PACK_CONFIG);
+                    if (rawPackConfig) {
+                        const parsed = JSON.parse(rawPackConfig);
+                        if (parsed && typeof parsed === 'object') setPackConfig(prev => ({ ...prev, ...parsed }));
+                    }
+                    const rawFlipbookConfig = localStorage.getItem(META_KEY_FLIPBOOK_CONFIG);
+                    if (rawFlipbookConfig) {
+                        const parsed = JSON.parse(rawFlipbookConfig);
+                        setFlipbookConfig(mergeFlipbookConfig(parsed));
+                    }
+                    const rawPreviewPresets = localStorage.getItem(PREVIEW_STORAGE_KEY_PRESETS);
+                    if (rawPreviewPresets) {
+                        const parsed = JSON.parse(rawPreviewPresets);
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            const nextPresets = parsed.map((preset, index) => {
+                                const validated = validatePreviewPreset(preset);
+                                const sanitized = validated.sanitizedPreset || sanitizePreviewPreset(preset);
+                                if (!sanitized.id) sanitized.id = index === 0 ? PREVIEW_DEFAULT_PRESET_ID : createPreviewPresetId();
+                                return sanitized;
+                            });
+                            setPreviewPresets(nextPresets);
+                            setPreviewActivePresetId(nextPresets[0].id);
+                            setPreviewSelectedLayerId(nextPresets[0].layers?.[0]?.id || null);
+                            setPreviewJsonDraft(JSON.stringify(nextPresets[0], null, 2));
+                        }
+                    }
+                    const rawPreviewUi = localStorage.getItem(PREVIEW_STORAGE_KEY_UI);
+                    if (rawPreviewUi) {
+                        const parsed = JSON.parse(rawPreviewUi);
+                        if (parsed && typeof parsed === 'object') {
+                            if (typeof parsed.activeSourceId === 'string') setPreviewActiveSourceId(parsed.activeSourceId);
+                            if (typeof parsed.activePresetId === 'string') setPreviewActivePresetId(parsed.activePresetId);
+                            if (typeof parsed.selectedLayerId === 'string') setPreviewSelectedLayerId(parsed.selectedLayerId);
+                            if (typeof parsed.isPlaying === 'boolean') setPreviewIsPlaying(parsed.isPlaying);
+                            if (Number.isFinite(parsed.timeScale)) setPreviewTimeScale(clampPreviewValue(parsed.timeScale, 0, 3));
+                            if (parsed.expandedModules && typeof parsed.expandedModules === 'object') setPreviewExpandedModules(parsed.expandedModules);
+                            if (parsed.advancedPanels && typeof parsed.advancedPanels === 'object') setPreviewAdvancedPanels(parsed.advancedPanels);
+                        }
+                    }
+                    const rawToolkitUi = localStorage.getItem(TOOLKIT_UI_STORAGE_KEY);
+                    if (rawToolkitUi) {
+                        const parsed = JSON.parse(rawToolkitUi);
+                        if (parsed && typeof parsed === 'object' && typeof parsed.baseUrl === 'string') {
+                            setToolkitBaseUrl(parsed.baseUrl);
+                            toolkitBridgeRef.current.setBaseUrl(parsed.baseUrl);
+                        }
+                    }
+                } catch (_) { }
                 hasHydratedMetaRef.current = true;
-            }, [mergeFlipbookConfig, mergeQualityFilters, normalizePackConfig, normalizeSavedSets]);
+            }, [mergeFlipbookConfig]);
             useEffect(() => {
                 const activeIds = new Set(savedLibrary.map((item) => item.id));
                 hydratedLibraryUrlsRef.current.forEach((url, id) => {
@@ -319,12 +309,6 @@
                     hydratedLibraryUrlsRef.current.delete(id);
                 });
             }, [savedLibrary]);
-            useEffect(() => {
-                setSavedSets((prev) => {
-                    const next = normalizeSavedSets(prev, savedLibrary);
-                    return areSetRecordsEqual(prev, next) ? prev : next;
-                });
-            }, [savedLibrary, normalizeSavedSets]);
             const normalizeExportStem = useCallback((value) => {
                 const raw = String(value || '').trim();
                 const tokens = raw.match(/[A-Za-z0-9]+/g) || [];
@@ -338,24 +322,6 @@
                 const suffix = getOutputFileSuffix(mode);
                 return suffix ? `${stem}_${suffix}.png` : `${stem}.png`;
             };
-            const sortItemsForPack = useCallback((items, config = packConfig) => {
-                if (!Array.isArray(items)) return [];
-                if ((config?.sortBy || 'none') === 'none') return [...items];
-                const next = [...items];
-                next.sort((a, b) => {
-                    let av = a?.name;
-                    let bv = b?.name;
-                    if (config.sortBy === 'density') { av = a?.density || 0; bv = b?.density || 0; }
-                    else if (config.sortBy === 'simplicity') { av = a?.sScore || 0; bv = b?.sScore || 0; }
-                    else if (config.sortBy === 'circularity') { av = a?.circularity || 0; bv = b?.circularity || 0; }
-                    else if (config.sortBy === 'squareness') { av = a?.squareness || 0; bv = b?.squareness || 0; }
-                    let result = 0;
-                    if (typeof av === 'number' && typeof bv === 'number') result = av - bv;
-                    else result = String(av || '').localeCompare(String(bv || ''));
-                    return config.sortDir === 'desc' ? -result : result;
-                });
-                return next;
-            }, [packConfig]);
             useEffect(() => {
                 const targets = savedLibrary.filter((item) => item?.id && item?.storageKey && !item?.url);
                 if (targets.length === 0) return;
@@ -411,26 +377,27 @@
 	                persistTimerRef.current = setTimeout(() => {
 	                    persistTimerRef.current = null;
 	                    try {
-                            const normalizedSets = normalizeSavedSets(savedSets, savedLibrary);
-	                        localStorage.setItem(V3_WORKSPACE_STORAGE_KEY, JSON.stringify({
-                                version: 3,
-                                library: savedLibrary.map((item) => ({ ...item, url: null })),
-                                sets: normalizedSets,
-                                customOperations,
-                                filterModules,
-                                defaultQualityFilters: qualityFilters,
-                                dreamParams,
-                                uiPrefs: {
-                                    autoAnimateFrames,
-                                    useWorkbenchSeed,
-                                    maskViewMode,
-                                    gridColumns,
-                                    activeTargetSetId,
-                                    selectedSetId
-                                },
-                                packConfig,
-                                flipbookConfig
-                            }));
+	                        localStorage.setItem(META_KEY_LIBRARY, JSON.stringify(savedLibrary.map((item) => ({ ...item, url: null }))));
+	                        localStorage.setItem(META_KEY_CUSTOM_OPS, JSON.stringify(customOperations));
+                        localStorage.setItem(META_KEY_FILTER_MODULES, JSON.stringify(filterModules));
+                        localStorage.setItem(META_KEY_QUALITY_FILTERS, JSON.stringify(qualityFilters));
+                        localStorage.setItem(META_KEY_DREAM_PARAMS, JSON.stringify(dreamParams));
+                        localStorage.setItem(META_KEY_UI_PREFS, JSON.stringify({ autoAnimateFrames, useWorkbenchSeed, maskViewMode, gridColumns }));
+                        localStorage.setItem(META_KEY_PACK_CONFIG, JSON.stringify(packConfig));
+                        localStorage.setItem(META_KEY_FLIPBOOK_CONFIG, JSON.stringify(flipbookConfig));
+                        localStorage.setItem(PREVIEW_STORAGE_KEY_PRESETS, JSON.stringify(previewPresets));
+                        localStorage.setItem(PREVIEW_STORAGE_KEY_UI, JSON.stringify({
+                            activeSourceId: previewActiveSourceId,
+                            activePresetId: previewActivePresetId,
+                            selectedLayerId: previewSelectedLayerId,
+                            isPlaying: previewIsPlaying,
+                            timeScale: previewTimeScale,
+                            expandedModules: previewExpandedModules,
+                            advancedPanels: previewAdvancedPanels
+                        }));
+                        localStorage.setItem(TOOLKIT_UI_STORAGE_KEY, JSON.stringify({
+                            baseUrl: toolkitBaseUrl
+                        }));
                     } catch (_) { }
                 }, 220);
 	                return () => {
@@ -439,36 +406,272 @@
 	                        persistTimerRef.current = null;
 	                    }
 	                };
-            }, [savedLibrary, savedSets, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, useWorkbenchSeed, maskViewMode, gridColumns, packConfig, flipbookConfig, activeTargetSetId, selectedSetId, normalizeSavedSets]);
+            }, [savedLibrary, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, useWorkbenchSeed, maskViewMode, gridColumns, packConfig, flipbookConfig, previewPresets, previewActiveSourceId, previewActivePresetId, previewSelectedLayerId, previewIsPlaying, previewTimeScale, previewExpandedModules, previewAdvancedPanels, toolkitBaseUrl]);
+
+            const previewSupported = useMemo(() => isPreviewWebGL2Supported(), []);
+            const activePreviewSourceItem = useMemo(() => savedLibrary.find((it) => it.id === previewActiveSourceId) || null, [savedLibrary, previewActiveSourceId]);
+            const activePreviewPreset = useMemo(() => previewPresets.find((preset) => preset.id === previewActivePresetId) || previewPresets[0] || null, [previewPresets, previewActivePresetId]);
+            const activePreviewLayer = useMemo(() => activePreviewPreset?.layers?.find((layer) => layer.id === previewSelectedLayerId) || activePreviewPreset?.layers?.[0] || null, [activePreviewPreset, previewSelectedLayerId]);
+            const activePreviewLayerUiKey = useMemo(() => getPreviewLayerUiKey(activePreviewPreset?.id, activePreviewLayer?.id), [activePreviewPreset?.id, activePreviewLayer?.id, getPreviewLayerUiKey]);
+            const activePreviewExpandedModule = useMemo(() => {
+                if (!activePreviewLayer) return 'main';
+                const stored = previewExpandedModules?.[activePreviewLayerUiKey];
+                if (stored) return stored;
+                const firstExpanded = PREVIEW_MODULE_KEYS.find((key) => activePreviewLayer.modules?.[key]?.expanded);
+                return firstExpanded || 'main';
+            }, [activePreviewLayer, activePreviewLayerUiKey, previewExpandedModules]);
+            const activePreviewAdvancedOpen = !!previewAdvancedPanels?.[activePreviewLayerUiKey];
+
+            useEffect(() => {
+                if (!activePreviewPreset) return;
+                setPreviewJsonDraft((prev) => {
+                    const next = JSON.stringify(activePreviewPreset, null, 2);
+                    return prev === next ? prev : next;
+                });
+                if (!activePreviewPreset.layers.some((layer) => layer.id === previewSelectedLayerId)) {
+                    setPreviewSelectedLayerId(activePreviewPreset.layers[0]?.id || null);
+                }
+            }, [activePreviewPreset, previewSelectedLayerId]);
+
+            useEffect(() => {
+                if (!previewSupported) {
+                    setPreviewRuntimeStatus('unsupported');
+                    return;
+                }
+                if (!savedLibrary.some((item) => item.id === previewActiveSourceId)) {
+                    setPreviewActiveSourceId((prev) => (prev && !savedLibrary.some((item) => item.id === prev) ? null : prev));
+                }
+            }, [savedLibrary, previewActiveSourceId, previewSupported]);
+
+            const loadPreviewSourceImage = useCallback(async (item) => {
+                if (!item) return null;
+                let sourceUrl = item.url || null;
+                if (!sourceUrl && item.storageKey) {
+                    const blob = await loadTextureBlob(item.storageKey);
+                    if (blob) sourceUrl = URL.createObjectURL(blob);
+                }
+                if (!sourceUrl) return null;
+                return await new Promise((resolve, reject) => {
+                    const image = new Image();
+                    image.onload = () => resolve({ image, revokeUrl: item.url ? null : sourceUrl });
+                    image.onerror = () => {
+                        if (!item.url) URL.revokeObjectURL(sourceUrl);
+                        reject(new Error('Failed to load preview source image.'));
+                    };
+                    image.src = sourceUrl;
+                });
+            }, []);
+
+            useEffect(() => {
+                if (activeTab !== 'preview') {
+                    if (previewAnimationFrameRef.current) {
+                        cancelAnimationFrame(previewAnimationFrameRef.current);
+                        previewAnimationFrameRef.current = null;
+                    }
+                    if (previewRuntimeRef.current) {
+                        previewRuntimeRef.current.dispose();
+                        previewRuntimeRef.current = null;
+                    }
+                    return;
+                }
+                if (!previewSupported) {
+                    setPreviewRuntimeStatus('unsupported');
+                    return;
+                }
+                if (!previewCanvasRef.current) return;
+                if (!previewRuntimeRef.current) {
+                    try {
+                        const runtime = new PreviewParticleRuntime({ canvas: previewCanvasRef.current });
+                        runtime.mount();
+                        previewRuntimeRef.current = runtime;
+                        setPreviewRuntimeStatus('ready');
+                    } catch (error) {
+                        console.error(error);
+                        setPreviewRuntimeStatus('error');
+                        return;
+                    }
+                }
+                const runtime = previewRuntimeRef.current;
+                const host = previewCanvasRef.current;
+                const updateSize = () => {
+                    if (!host || !runtime) return;
+                    runtime.resize(host.clientWidth || host.width || 1, host.clientHeight || host.height || 1);
+                };
+                updateSize();
+                let running = true;
+                const frame = (now) => {
+                    if (!running || !previewRuntimeRef.current) return;
+                    try {
+                        previewRuntimeRef.current.tick(now);
+                    } catch (error) {
+                        console.error(error);
+                        setPreviewRuntimeStatus('error');
+                        running = false;
+                        return;
+                    }
+                    previewAnimationFrameRef.current = requestAnimationFrame(frame);
+                };
+                previewAnimationFrameRef.current = requestAnimationFrame(frame);
+                window.addEventListener('resize', updateSize);
+                return () => {
+                    running = false;
+                    window.removeEventListener('resize', updateSize);
+                    if (previewAnimationFrameRef.current) {
+                        cancelAnimationFrame(previewAnimationFrameRef.current);
+                        previewAnimationFrameRef.current = null;
+                    }
+                    if (previewRuntimeRef.current) {
+                        previewRuntimeRef.current.dispose();
+                        previewRuntimeRef.current = null;
+                    }
+                };
+            }, [activeTab, previewSupported]);
+
+            useEffect(() => {
+                if (!previewRuntimeRef.current || !activePreviewPreset || activeTab !== 'preview') return;
+                const validation = validatePreviewPreset(activePreviewPreset);
+                if (!validation.valid) {
+                    setPreviewRuntimeStatus('invalid_preset');
+                    setPreviewJsonError(validation.errors.join('\n'));
+                    return;
+                }
+                try {
+                    previewRuntimeRef.current.setPreset(validation.sanitizedPreset);
+                    setPreviewRuntimeStatus(activePreviewSourceItem ? 'running' : 'running_fallback_sprite');
+                } catch (error) {
+                    console.error(error);
+                    setPreviewRuntimeStatus('error');
+                }
+            }, [activePreviewPreset, activeTab, activePreviewSourceItem]);
+
+            useEffect(() => {
+                if (!previewRuntimeRef.current || activeTab !== 'preview') return;
+                previewRuntimeRef.current.setPlaying(previewIsPlaying);
+            }, [previewIsPlaying, activeTab]);
+
+            useEffect(() => {
+                if (!previewRuntimeRef.current || activeTab !== 'preview') return;
+                previewRuntimeRef.current.setTimeScale(previewTimeScale);
+            }, [previewTimeScale, activeTab]);
+
+            useEffect(() => {
+                if (!previewRuntimeRef.current || activeTab !== 'preview') return;
+                if (!activePreviewSourceItem) {
+                    previewRuntimeRef.current.setSourceImage(null);
+                    setPreviewRuntimeStatus(activePreviewPreset ? 'running_fallback_sprite' : 'idle');
+                    return;
+                }
+                const loadId = ++previewSourceLoadIdRef.current;
+                let cancelled = false;
+                setPreviewRuntimeStatus('ready');
+                loadPreviewSourceImage(activePreviewSourceItem).then((result) => {
+                    if (cancelled || loadId !== previewSourceLoadIdRef.current || !previewRuntimeRef.current) {
+                        if (result?.revokeUrl) URL.revokeObjectURL(result.revokeUrl);
+                        return;
+                    }
+                    previewRuntimeRef.current.setSourceImage(result.image);
+                    setPreviewRuntimeStatus('running');
+                    if (result?.revokeUrl) URL.revokeObjectURL(result.revokeUrl);
+                }).catch((error) => {
+                    console.error(error);
+                    if (!cancelled) setPreviewRuntimeStatus('error');
+                });
+                return () => {
+                    cancelled = true;
+                };
+            }, [activePreviewSourceItem, activeTab, activePreviewPreset, loadPreviewSourceImage]);
 
             const sets = useMemo(() => {
-                const libraryById = new Map(savedLibrary.map((item) => [item.id, item]));
-                return normalizeSavedSets(savedSets, savedLibrary).map((setRecord) => ({
-                    ...setRecord,
-                    items: sortItemsForPack(setRecord.itemIds.map((itemId) => libraryById.get(itemId)).filter(Boolean))
-                }));
-            }, [savedLibrary, savedSets, normalizeSavedSets, sortItemsForPack]);
-            const setMap = useMemo(() => new Map(sets.map((set) => [set.id, set])), [sets]);
-            const selectedSet = setMap.get(selectedSetId) || sets[0] || null;
-            const activeTargetSet = setMap.get(activeTargetSetId) || setMap.get(PRIMARY_SET_ID) || sets[0] || null;
-            const resolveFailTargetSetId = useCallback((setRecord, setRecords) => {
-                const fallbackId = setRecords.some((candidate) => candidate.id === REJECTS_SET_ID)
-                    ? REJECTS_SET_ID
-                    : (setRecords[0]?.id || null);
-                if (!setRecord?.failTargetSetId) return fallbackId;
-                if (setRecord.failTargetSetId === setRecord.id) return fallbackId;
-                return setRecords.some((candidate) => candidate.id === setRecord.failTargetSetId)
-                    ? setRecord.failTargetSetId
-                    : fallbackId;
-            }, []);
-            const getSetNameById = useCallback((setId, records = sets) => {
-                const match = records.find((record) => record.id === setId);
-                return match?.name || 'Unassigned';
-            }, [sets]);
-            const getItemSetId = useCallback((itemId, records = sets) => {
-                const match = records.find((record) => record.itemIds.includes(itemId));
-                return match?.id || null;
-            }, [sets]);
+                const normalizeName = (item) => String(item?.name || 'Misc');
+                const getGroupKey = (item) => {
+                    if (packConfig.groupBy === 'volume_fill') return '__all__';
+                    const name = normalizeName(item);
+                    const parts = name.split('_').filter(Boolean);
+                    if (packConfig.groupBy === 'full') return name || 'Misc';
+                    if (packConfig.groupBy === 'shape_variant') return parts.slice(0, 2).join('_') || parts[0] || 'Misc';
+                    const depth = Math.max(1, Math.min(parseInt(packConfig.groupDepth || 2), Math.max(1, parts.length - 1)));
+                    return parts.slice(0, depth).join('_') || 'Misc';
+                };
+                const cmp = (a, b) => {
+                    if (packConfig.sortBy === 'none') return 0;
+                    let av = a.name;
+                    let bv = b.name;
+                    if (packConfig.sortBy === 'density') { av = a.density || 0; bv = b.density || 0; }
+                    else if (packConfig.sortBy === 'simplicity') { av = a.sScore || 0; bv = b.sScore || 0; }
+                    else if (packConfig.sortBy === 'circularity') { av = a.circularity || 0; bv = b.circularity || 0; }
+                    else if (packConfig.sortBy === 'squareness') { av = a.squareness || 0; bv = b.squareness || 0; }
+                    let res = 0;
+                    if (typeof av === 'number' && typeof bv === 'number') res = av - bv;
+                    else res = String(av).localeCompare(String(bv));
+                    return packConfig.sortDir === 'desc' ? -res : res;
+                };
+                const ts = {};
+                savedLibrary.forEach(it => {
+                    const key = getGroupKey(it);
+                    if (!ts[key]) ts[key] = [];
+                    ts[key].push(it);
+                });
+                const final = [];
+                const keys = Object.keys(ts).sort((a, b) => a.localeCompare(b));
+                const maxItemsPerPack = Math.max(1, parseInt(packConfig.maxItemsPerPack || 50));
+                keys.forEach(k => {
+                    const its = packConfig.sortBy === 'none' ? [...ts[k]] : [...ts[k]].sort(cmp);
+                    if (its.length <= maxItemsPerPack) {
+                        const setId = k;
+                        const singleName = packConfig.groupBy === 'volume_fill'
+                            ? (packConfig.setNameOverrides?.[setId] || 'Volume 1')
+                            : k;
+                        final.push({ id: setId, baseKey: k, name: singleName, items: its });
+                    }
+                    else {
+                        for (let i = 0; i < its.length; i += maxItemsPerPack) {
+                            const vol = Math.floor(i / maxItemsPerPack) + 1;
+                            const setId = `${k}${i}`;
+                            const name = packConfig.groupBy === 'volume_fill'
+                                ? (packConfig.setNameOverrides?.[setId] || `Volume ${vol}`)
+                                : (vol === 1 ? k : `${k} Vol ${vol}`);
+                            final.push({ id: setId, baseKey: k, name, items: its.slice(i, i + maxItemsPerPack) });
+                        }
+                    }
+                });
+                return final;
+            }, [savedLibrary, packConfig]);
+
+            const reorganizePacks = () => {
+                setSavedLibrary(prev => {
+                    if ((packConfig.sortBy || 'none') === 'none') return prev;
+                    const normalizeName = (item) => String(item?.name || 'Misc');
+                    const getGroupKey = (item) => {
+                        if (packConfig.groupBy === 'volume_fill') return '__all__';
+                        const name = normalizeName(item);
+                        const parts = name.split('_').filter(Boolean);
+                        if (packConfig.groupBy === 'full') return name || 'Misc';
+                        if (packConfig.groupBy === 'shape_variant') return parts.slice(0, 2).join('_') || parts[0] || 'Misc';
+                        const depth = Math.max(1, Math.min(parseInt(packConfig.groupDepth || 2), Math.max(1, parts.length - 1)));
+                        return parts.slice(0, depth).join('_') || 'Misc';
+                    };
+                    const cmp = (a, b) => {
+                        if (packConfig.sortBy === 'none') return 0;
+                        let av = a.name;
+                        let bv = b.name;
+                        if (packConfig.sortBy === 'density') { av = a.density || 0; bv = b.density || 0; }
+                        else if (packConfig.sortBy === 'simplicity') { av = a.sScore || 0; bv = b.sScore || 0; }
+                        else if (packConfig.sortBy === 'circularity') { av = a.circularity || 0; bv = b.circularity || 0; }
+                        else if (packConfig.sortBy === 'squareness') { av = a.squareness || 0; bv = b.squareness || 0; }
+                        let res = 0;
+                        if (typeof av === 'number' && typeof bv === 'number') res = av - bv;
+                        else res = String(av).localeCompare(String(bv));
+                        return packConfig.sortDir === 'desc' ? -res : res;
+                    };
+                    return [...prev].sort((a, b) => {
+                        const ga = getGroupKey(a);
+                        const gb = getGroupKey(b);
+                        const gcmp = ga.localeCompare(gb);
+                        if (gcmp !== 0) return gcmp;
+                        return cmp(a, b);
+                    });
+                });
+            };
 
             const moveArrayItem = (arr, fromIndex, toIndex) => {
                 if (!Array.isArray(arr)) return arr;
@@ -519,249 +722,79 @@
                 return compactResultsByBottomFill(results, shouldRemove);
             };
 
-            useEffect(() => {
-                const validIds = new Set(sets.map((set) => set.id));
-                const fallbackId = validIds.has(PRIMARY_SET_ID) ? PRIMARY_SET_ID : (sets[0]?.id || null);
-                if (!fallbackId) return;
-                setSelectedSetId((prev) => validIds.has(prev) ? prev : fallbackId);
-                setActiveTargetSetId((prev) => validIds.has(prev) ? prev : fallbackId);
-            }, [sets]);
+	            const reorderByDrag = (sourceId, targetId) => {
+	                const cfg = packConfig || {};
+	                const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
+	                if (!reorderEnabled) return;
+	                if (!sourceId || !targetId || sourceId === targetId) return;
 
-            const extractItemAnalysis = (item) => ({
-                density: Number(item?.density || 0),
-                sScore: Number(item?.sScore || 0),
-                circularity: Number(item?.circularity || 0),
-                squareness: Number(item?.squareness || 0),
-                changeScore: Number(item?.changeScore || 0),
-                jitterScore: Number(item?.jitterScore || 0),
-                hash: item?.hash || ''
-            });
-
-            const runStageAlphaAndSimplicityGate = (analysis, filters) => {
-                const alphaFilter = filters.alpha;
-                if (alphaFilter.enabled && (analysis.density < alphaFilter.min || analysis.density > alphaFilter.max)) return { pass: false, reason: 'alpha' };
-                const simplicityFilter = filters.simplicity;
-                if (simplicityFilter.enabled && (analysis.sScore < simplicityFilter.min || analysis.sScore > simplicityFilter.max)) return { pass: false, reason: 'simplicity' };
-                return { pass: true, reason: '' };
-            };
-
-            const runStageShapeGate = (analysis, filters) => {
-                const shapeFilter = filters.shape;
-                if (!shapeFilter.enabled) return { pass: true, reason: '' };
-                if (analysis.circularity < shapeFilter.minCircularity || analysis.circularity > shapeFilter.maxCircularity) return { pass: false, reason: 'shape' };
-                if (analysis.squareness < shapeFilter.minSquareness || analysis.squareness > shapeFilter.maxSquareness) return { pass: false, reason: 'shape' };
-                return { pass: true, reason: '' };
-            };
-
-            const runStageSimilarityGate = (analysis, recentHashes, filters) => {
-                const similarityFilter = filters.similarity;
-                if (!similarityFilter.enabled || !analysis.hash) return { pass: true, reason: '', similarity: 0 };
-                const bestSimilarity = getBestSimilarity(analysis.hash, recentHashes, similarityFilter.historySize);
-                if (bestSimilarity > similarityFilter.maxSimilarity) return { pass: false, reason: 'similarity', similarity: bestSimilarity };
-                return { pass: true, reason: '', similarity: bestSimilarity };
-            };
-
-            const runStageTemporalGate = (analysis, filters) => {
-                const temporalFilter = filters.temporalChange;
-                if (!temporalFilter.enabled) return { pass: true, reason: '' };
-                const changeScore = Number(analysis.changeScore || 0);
-                const jitterScore = Number(analysis.jitterScore || 0);
-                if (changeScore < temporalFilter.minChange || changeScore > temporalFilter.maxChange) return { pass: false, reason: 'temporal' };
-                if (jitterScore > temporalFilter.maxJitter) return { pass: false, reason: 'temporal' };
-                return { pass: true, reason: '' };
-            };
-
-            const assignItemsToSetWithRouting = useCallback((setRecords, entries, libraryItems) => {
-                const normalized = normalizeSavedSets(setRecords, libraryItems).map((setRecord) => ({
-                    ...setRecord,
-                    itemIds: [...setRecord.itemIds],
-                    qualityFilters: mergeQualityFilters(setRecord.qualityFilters)
-                }));
-                const stageCounts = createStageRejectCounters();
-                const itemAssignments = [];
-                const setById = new Map(normalized.map((setRecord) => [setRecord.id, setRecord]));
-                const libraryById = new Map((libraryItems || []).map((item) => [item.id, item]));
-                const setHashes = new Map(normalized.map((setRecord) => [
-                    setRecord.id,
-                    setRecord.itemIds.map((itemId) => libraryById.get(itemId)?.hash).filter(Boolean)
-                ]));
-                const appendToSet = (setId, itemId) => {
-                    const targetSet = setById.get(setId);
-                    const item = libraryById.get(itemId);
-                    if (!targetSet || !item) return;
-                    if (!targetSet.itemIds.includes(itemId)) targetSet.itemIds.push(itemId);
-                    if (item.hash) {
-                        const hashes = setHashes.get(setId) || [];
-                        hashes.push(item.hash);
-                        setHashes.set(setId, hashes);
-                    }
-                };
-                const removeFromAllSets = (itemId) => {
-                    normalized.forEach((setRecord) => {
-                        if (!setRecord.itemIds.includes(itemId)) return;
-                        setRecord.itemIds = setRecord.itemIds.filter((candidateId) => candidateId !== itemId);
-                    });
-                };
-
-                (entries || []).forEach((entry) => {
-                    const item = entry?.item;
-                    if (!item?.id) return;
-                    removeFromAllSets(item.id);
-                    const requestedTargetId = entry?.targetSetId;
-                    const targetSet = setById.get(requestedTargetId) || setById.get(PRIMARY_SET_ID) || normalized[0] || null;
-                    if (!targetSet) return;
-
-                    let finalSetId = targetSet.id;
-                    let reason = '';
-                    if (targetSet.evaluationStage !== 'disabled') {
-                        const filters = mergeQualityFilters(targetSet.qualityFilters);
-                        const analysis = extractItemAnalysis(item);
-                        const stageAlpha = runStageAlphaAndSimplicityGate(analysis, filters);
-                        const stageShape = runStageShapeGate(analysis, filters);
-                        const stageSimilarity = runStageSimilarityGate(analysis, setHashes.get(targetSet.id) || [], filters);
-                        const stageTemporal = runStageTemporalGate(analysis, filters);
-                        const firstFailure = [stageAlpha, stageShape, stageSimilarity, stageTemporal].find((stage) => !stage.pass);
-                        if (firstFailure) {
-                            reason = firstFailure.reason || 'other';
-                            countReject(stageCounts, reason);
-                            finalSetId = resolveFailTargetSetId(targetSet, normalized);
-                        }
-                    }
-
-                    appendToSet(finalSetId, item.id);
-                    itemAssignments.push({
-                        itemId: item.id,
-                        requestedSetId: targetSet.id,
-                        finalSetId,
-                        reason,
-                        routed: finalSetId !== targetSet.id
-                    });
+                setSavedLibrary(prev => {
+                    const fromIndex = prev.findIndex(it => it.id === sourceId);
+                    const toIndex = prev.findIndex(it => it.id === targetId);
+                    if (fromIndex < 0 || toIndex < 0) return prev;
+                    return moveArrayItem(prev, fromIndex, toIndex);
                 });
 
-                return {
-                    sets: normalizeSavedSets(normalized, libraryItems),
-                    itemAssignments,
-                    stageRejects: stageCounts
-                };
-            }, [mergeQualityFilters, normalizeSavedSets, resolveFailTargetSetId]);
-
-            const reorderByDrag = (sourceId, targetId) => {
-                const reorderEnabled = (packConfig?.sortBy || 'none') === 'none';
-                const targetSetRecord = selectedSet || activeTargetSet || null;
-                if (!reorderEnabled || !targetSetRecord || !sourceId || !targetId || sourceId === targetId) return;
-                setSavedSets((prev) => {
-                    const normalized = normalizeSavedSets(prev, savedLibraryRef.current);
-                    const next = normalized.map((setRecord) => {
-                        if (setRecord.id !== targetSetRecord.id) return setRecord;
-                        const fromIndex = setRecord.itemIds.findIndex((itemId) => itemId === sourceId);
-                        const toIndex = setRecord.itemIds.findIndex((itemId) => itemId === targetId);
-                        if (fromIndex < 0 || toIndex < 0) return setRecord;
-                        return { ...setRecord, itemIds: moveArrayItem(setRecord.itemIds, fromIndex, toIndex) };
-                    });
-                    return normalizeSavedSets(next, savedLibraryRef.current);
+                setDreamState(prev => {
+                    const fromIndex = prev.results.findIndex(it => it.id === sourceId);
+                    const toIndex = prev.results.findIndex(it => it.id === targetId);
+	                    if (fromIndex < 0 || toIndex < 0) return prev;
+	                    return { ...prev, results: moveArrayItem(prev.results, fromIndex, toIndex) };
+	                });
+	            };
+            const moveLibraryItemToIndex = (itemId, toIndex) => {
+                const cfg = packConfig || {};
+                const reorderEnabled = cfg.groupBy === 'volume_fill' && (cfg.sortBy || 'none') === 'none';
+                if (!reorderEnabled || !itemId) return;
+                setSavedLibrary((prev) => {
+                    const fromIndex = prev.findIndex((it) => it.id === itemId);
+                    if (fromIndex < 0) return prev;
+                    const boundedTarget = Math.max(0, Math.min(toIndex, prev.length - 1));
+                    return moveArrayItem(prev, fromIndex, boundedTarget);
+                });
+                setDreamState((prev) => {
+                    const fromIndex = prev.results.findIndex((it) => it.id === itemId);
+                    if (fromIndex < 0) return prev;
+                    const boundedTarget = Math.max(0, Math.min(toIndex, prev.results.length - 1));
+                    return { ...prev, results: moveArrayItem(prev.results, fromIndex, boundedTarget) };
                 });
             };
-            const moveSetItemToIndex = (itemId, toIndex) => {
-                const reorderEnabled = (packConfig?.sortBy || 'none') === 'none';
-                const targetSetRecord = selectedSet || activeTargetSet || null;
-                if (!reorderEnabled || !targetSetRecord || !itemId) return;
-                setSavedSets((prev) => {
-                    const normalized = normalizeSavedSets(prev, savedLibraryRef.current);
-                    const next = normalized.map((setRecord) => {
-                        if (setRecord.id !== targetSetRecord.id) return setRecord;
-                        const fromIndex = setRecord.itemIds.findIndex((candidateId) => candidateId === itemId);
-                        if (fromIndex < 0) return setRecord;
-                        const boundedTarget = Math.max(0, Math.min(toIndex, setRecord.itemIds.length - 1));
-                        return { ...setRecord, itemIds: moveArrayItem(setRecord.itemIds, fromIndex, boundedTarget) };
-                    });
-                    return normalizeSavedSets(next, savedLibraryRef.current);
-                });
-            };
-            const sendToFront = (itemId) => moveSetItemToIndex(itemId, 0);
+            const sendToFront = (itemId) => moveLibraryItemToIndex(itemId, 0);
             const sendToBack = (itemId) => {
-                const total = selectedSet?.itemIds?.length || 0;
-                moveSetItemToIndex(itemId, Math.max(0, total - 1));
-            };
-
-            const createSet = () => {
-                const nextSetName = (() => {
-                    const names = new Set((savedSetsRef.current || []).map((setRecord) => setRecord.name));
-                    let volumeNumber = 1;
-                    while (names.has(`Volume ${volumeNumber}`)) volumeNumber++;
-                    return `Volume ${volumeNumber}`;
-                })();
-                const nextSet = buildSetRecord(nextSetName, {
-                    qualityFilters,
-                    evaluationStage: DEFAULT_SET_EVALUATION_STAGE,
-                    failTargetSetId: REJECTS_SET_ID
-                });
-                setSavedSets((prev) => normalizeSavedSets([...normalizeSavedSets(prev, savedLibraryRef.current), nextSet], savedLibraryRef.current));
-                setSelectedSetId(nextSet.id);
-                return nextSet;
+                const total = savedLibraryRef.current?.length || savedLibrary.length || 0;
+                moveLibraryItemToIndex(itemId, Math.max(0, total - 1));
             };
 
             const handleRenameSet = (targetSet, newName) => {
-                const trimmedName = String(newName || '').trim();
-                if (!targetSet?.id || !trimmedName) return;
-                setSavedSets((prev) => prev.map((setRecord) => setRecord.id === targetSet.id ? { ...setRecord, name: trimmedName } : setRecord));
-            };
-            const updateSetPolicy = (setId, patch) => {
-                setSavedSets((prev) => normalizeSavedSets(prev.map((setRecord) => {
-                    if (setRecord.id !== setId) return setRecord;
-                    const nextFailTarget = patch?.failTargetSetId === setId ? REJECTS_SET_ID : patch?.failTargetSetId;
-                    return {
-                        ...setRecord,
-                        ...patch,
-                        failTargetSetId: typeof nextFailTarget === 'undefined' ? setRecord.failTargetSetId : nextFailTarget
-                    };
-                }), savedLibraryRef.current));
-            };
-            const updateSetQuality = (setId, section, key, value) => {
-                setSavedSets((prev) => normalizeSavedSets(prev.map((setRecord) => {
-                    if (setRecord.id !== setId) return setRecord;
-                    return {
-                        ...setRecord,
-                        qualityFilters: {
-                            ...mergeQualityFilters(setRecord.qualityFilters),
-                            [section]: {
-                                ...mergeQualityFilters(setRecord.qualityFilters)[section],
-                                [key]: value
-                            }
+                const trimmedName = (newName || '').trim();
+                if (!trimmedName) return;
+                if (packConfig.groupBy === 'volume_fill') {
+                    setPackConfig(prev => ({
+                        ...prev,
+                        setNameOverrides: {
+                            ...(prev?.setNameOverrides || {}),
+                            [targetSet?.id || '__all__']: trimmedName
                         }
-                    };
-                }), savedLibraryRef.current));
-            };
-            const toggleSetQualityEnabled = (setId, section) => {
-                setSavedSets((prev) => normalizeSavedSets(prev.map((setRecord) => {
-                    if (setRecord.id !== setId) return setRecord;
-                    const merged = mergeQualityFilters(setRecord.qualityFilters);
-                    return {
-                        ...setRecord,
-                        qualityFilters: {
-                            ...merged,
-                            [section]: {
-                                ...merged[section],
-                                enabled: !merged[section].enabled
-                            }
-                        }
-                    };
-                }), savedLibraryRef.current));
-            };
-            const toggleSetQualityExpanded = (setId, section) => {
-                setSavedSets((prev) => normalizeSavedSets(prev.map((setRecord) => {
-                    if (setRecord.id !== setId) return setRecord;
-                    const merged = mergeQualityFilters(setRecord.qualityFilters);
-                    return {
-                        ...setRecord,
-                        qualityFilters: {
-                            ...merged,
-                            [section]: {
-                                ...merged[section],
-                                expanded: !merged[section].expanded
-                            }
-                        }
-                    };
-                }), savedLibraryRef.current));
+                    }));
+                    return;
+                }
+                const newNameBase = trimmedName.replace(/\s+/g, '_') || 'Set';
+                setSavedLibrary(prev => {
+                    const setItemIds = new Set(Array.isArray(targetSet?.items) ? targetSet.items.map(i => i.id) : []);
+                    let groupItems = prev.filter(i => setItemIds.has(i.id));
+                    if (groupItems.length === 0) {
+                        const oldKey = typeof targetSet === 'string' ? targetSet : (targetSet?.baseKey || targetSet?.name || '');
+                        const normalizedOldKey = (oldKey || '').replace(/\s+Vol\s+\d+$/i, '').replace(/\s+/g, '_');
+                        groupItems = prev.filter(i => i.name.split('_').slice(0, -1).join('_') === normalizedOldKey);
+                    }
+                    const groupOrder = groupItems.map(i => i.id);
+                    return prev.map((item) => {
+                        const groupIdx = groupOrder.indexOf(item.id);
+                        if (groupIdx < 0) return item;
+                        const indexStr = (groupIdx + 1).toString().padStart(2, '0');
+                        return { ...item, name: `${newNameBase}_${indexStr}` };
+                    });
+                });
             };
 
             const buildEnabledFilterSteps = () => filterModules
@@ -892,6 +925,40 @@
                     if (similarity > bestSimilarity) bestSimilarity = similarity;
                 }
                 return bestSimilarity;
+            };
+
+            const runStageAlphaAndSimplicityGate = (analysis) => {
+                const alphaFilter = qualityFilters.alpha;
+                if (alphaFilter.enabled && (analysis.density < alphaFilter.min || analysis.density > alphaFilter.max)) return { pass: false, reason: 'alpha' };
+                const simplicityFilter = qualityFilters.simplicity;
+                if (simplicityFilter.enabled && (analysis.sScore < simplicityFilter.min || analysis.sScore > simplicityFilter.max)) return { pass: false, reason: 'simplicity' };
+                return { pass: true, reason: '' };
+            };
+
+            const runStageShapeGate = (analysis) => {
+                const shapeFilter = qualityFilters.shape;
+                if (!shapeFilter.enabled) return { pass: true, reason: '' };
+                if (analysis.circularity < shapeFilter.minCircularity || analysis.circularity > shapeFilter.maxCircularity) return { pass: false, reason: 'shape' };
+                if (analysis.squareness < shapeFilter.minSquareness || analysis.squareness > shapeFilter.maxSquareness) return { pass: false, reason: 'shape' };
+                return { pass: true, reason: '' };
+            };
+
+            const runStageSimilarityGate = (analysis, recentHashes) => {
+                const similarityFilter = qualityFilters.similarity;
+                if (!similarityFilter.enabled || !analysis.hash) return { pass: true, reason: '', similarity: 0 };
+                const bestSimilarity = getBestSimilarity(analysis.hash, recentHashes, similarityFilter.historySize);
+                if (bestSimilarity > similarityFilter.maxSimilarity) return { pass: false, reason: 'similarity', similarity: bestSimilarity };
+                return { pass: true, reason: '', similarity: bestSimilarity };
+            };
+
+            const runStageTemporalGate = (analysis) => {
+                const temporalFilter = qualityFilters.temporalChange;
+                if (!temporalFilter.enabled) return { pass: true, reason: '' };
+                const changeScore = Number(analysis.changeScore || 0);
+                const jitterScore = Number(analysis.jitterScore || 0);
+                if (changeScore < temporalFilter.minChange || changeScore > temporalFilter.maxChange) return { pass: false, reason: 'temporal' };
+                if (jitterScore > temporalFilter.maxJitter) return { pass: false, reason: 'temporal' };
+                return { pass: true, reason: '' };
             };
 
             const computeTemporalMetricsForConfig = (engine, baseConfig, frameCount, seed, renderOptions) => {
@@ -1072,7 +1139,6 @@
                 const temporalFrameCount = Math.max(4, Math.min(8, Math.round((dreamParams.flipFrames || 16) * 0.5)));
                 const commitChunkSize = Math.max(6, Math.round(6 + initialOverdrive * 24));
                 const maxAttemptsPerJob = 6;
-                const dreamTargetSetId = activeTargetSetId || PRIMARY_SET_ID;
                 const isEngineContextLost = (engine) => {
                     const gl = engine?.gl;
                     if (!gl) return true;
@@ -1090,6 +1156,7 @@
 
                 const snapshotLibrary = savedLibraryRef.current || [];
                 let existingNames = new Set(snapshotLibrary.map(i => i.name));
+                const acceptedHashes = snapshotLibrary.map(i => i.hash).filter(Boolean);
                 const stageRejects = createStageRejectCounters();
                 let acceptedTotal = 0;
                 let attemptedTotal = 0;
@@ -1129,24 +1196,8 @@
                     if (!force && pendingResultItems.length < commitChunkSize && performance.now() - lastCommitAt < 250) return;
                     if (!pendingResultItems.length && !pendingLibraryItems.length) return;
                     const toLibrary = pendingLibraryItems.splice(0, pendingLibraryItems.length);
-                    let toResults = pendingResultItems.splice(0, pendingResultItems.length);
-                    if (toLibrary.length) {
-                        const nextLibrary = [...(savedLibraryRef.current || []), ...toLibrary];
-                        const routing = assignItemsToSetWithRouting(
-                            savedSetsRef.current || [],
-                            toLibrary.map((item) => ({ item, targetSetId: dreamTargetSetId })),
-                            nextLibrary
-                        );
-                        acceptedTotal += routing.itemAssignments.filter((entry) => !entry.routed).length;
-                        rejectedTotal += routing.itemAssignments.filter((entry) => entry.routed).length;
-                        Object.entries(routing.stageRejects).forEach(([key, value]) => {
-                            if (Object.prototype.hasOwnProperty.call(stageRejects, key)) stageRejects[key] += value;
-                        });
-                        const assignedSetByItemId = new Map(routing.itemAssignments.map((entry) => [entry.itemId, entry.finalSetId]));
-                        toResults = toResults.map((item) => ({ ...item, setId: assignedSetByItemId.get(item.id) || dreamTargetSetId }));
-                        setSavedLibrary(nextLibrary);
-                        setSavedSets(routing.sets);
-                    }
+                    const toResults = pendingResultItems.splice(0, pendingResultItems.length);
+                    if (toLibrary.length) setSavedLibrary(prev => [...prev, ...toLibrary]);
                     if (toResults.length) {
                         setDreamState(p => ({
                             ...p,
@@ -1221,10 +1272,35 @@
                                 workerEngine.renderStack(cfg, renderOptions);
                                 const analysis = workerEngine.analyzeTexture(cfg.length - 1);
 
+                                const stageAlpha = runStageAlphaAndSimplicityGate(analysis);
+                                if (!stageAlpha.pass) {
+                                    rejectedTotal++;
+                                    countReject(stageRejects, stageAlpha.reason);
+                                    continue;
+                                }
+                                const stageShape = runStageShapeGate(analysis);
+                                if (!stageShape.pass) {
+                                    rejectedTotal++;
+                                    countReject(stageRejects, stageShape.reason);
+                                    continue;
+                                }
+                                const stageSimilarity = runStageSimilarityGate(analysis, acceptedHashes);
+                                if (!stageSimilarity.pass) {
+                                    rejectedTotal++;
+                                    countReject(stageRejects, stageSimilarity.reason);
+                                    continue;
+                                }
+
                                 // Stage 4 gate: expensive temporal check at lower resolution and fewer frames.
                                 const temporalMetrics = computeTemporalMetricsForConfig(workerEngine, cfg, temporalFrameCount, `dream-${loopCounter}-${jobIndex}-${attempt}`, renderOptions);
                                 analysis.changeScore = temporalMetrics.changeScore;
                                 analysis.jitterScore = temporalMetrics.jitterScore;
+                                const stageTemporal = runStageTemporalGate(analysis);
+                                if (!stageTemporal.pass) {
+                                    rejectedTotal++;
+                                    countReject(stageRejects, stageTemporal.reason);
+                                    continue;
+                                }
 
                                 const baseItem = {
                                     config: cfg,
@@ -1240,6 +1316,8 @@
                                     renderOptions
                                 };
                                 existingNames.add(baseItem.name);
+                                if (analysis.hash) acceptedHashes.push(analysis.hash);
+                                acceptedTotal++;
                                 backfillQueue.push(baseItem);
                                 break;
                             }
@@ -1316,34 +1394,30 @@
 	                    const rs = [256, 512, 1024, 2048];
 	                    const exportStem = normalizeExportStem(targetSet.name);
 	                    const packWorkers = Math.max(1, Math.min(MAX_PACKAGING_WORKERS, parseInt(dreamParams.packagingWorkers || 1)));
-                        const itemsPerPack = Math.max(1, parseInt(packConfig?.maxItemsPerPack || 50, 10) || 50);
-                        const targetItems = sortItemsForPack(targetSet.items, packConfig);
 	                    for (const r of rs) {
 	                        setExportPhase(`Exporting ${r}px textures...`);
 	                        const resFolder = zip.folder(`${exportStem}_${r}`);
-	                        const rendered = new Array(targetItems.length);
-	                        const engines = Array.from({ length: Math.min(packWorkers, targetItems.length) }, () => new TextureEngine(r, r));
-	                        await VMUtils.runWorkerPool(targetItems.length, engines.length || 1, async (idx, slot) => {
+	                        const rendered = new Array(targetSet.items.length);
+	                        const engines = Array.from({ length: Math.min(packWorkers, targetSet.items.length) }, () => new TextureEngine(r, r));
+	                        await VMUtils.runWorkerPool(targetSet.items.length, engines.length || 1, async (idx, slot) => {
 	                            const engine = engines[slot] || engines[0];
-	                            const item = targetItems[idx];
+	                            const item = targetSet.items[idx];
 	                            engine.renderStack(item.config);
 	                            rendered[idx] = {};
                                 for (const mode of OUTPUT_EXPORT_MODES) {
 	                                rendered[idx][mode] = await engine.getTextureBlob(item.config.length - 1, 'image/png', undefined, { mode });
                                 }
 	                        });
-	                        for (let idx = 0; idx < targetItems.length; idx++) {
-                                const packIndex = Math.floor(idx / itemsPerPack) + 1;
-                                const packFolder = resFolder.folder(`Pack_${String(packIndex).padStart(2, '0')}`);
+	                        for (let idx = 0; idx < targetSet.items.length; idx++) {
 	                            const fileName = `${exportStem}_${(idx + 1).toString().padStart(2, '0')}_x${r}`;
                                 for (const mode of OUTPUT_EXPORT_MODES) {
-	                                packFolder.file(buildOutputFileName(fileName, mode), rendered[idx]?.[mode] || new Blob());
+	                                resFolder.file(buildOutputFileName(fileName, mode), rendered[idx]?.[mode] || new Blob());
                                 }
 	                        }
 	                    }
 	                    const flipbooksRoot = zip.folder(`${exportStem}_Flipbooks`);
-	                    for (let itIdx = 0; itIdx < targetItems.length; itIdx++) {
-	                        const item = targetItems[itIdx];
+	                    for (let itIdx = 0; itIdx < targetSet.items.length; itIdx++) {
+	                        const item = targetSet.items[itIdx];
 	                        const indexPadded = (itIdx + 1).toString().padStart(2, '0');
 	                        const baseFileName = `${exportStem}_${indexPadded}`;
 	                        const fE = new TextureEngine(1024, 1024);
@@ -1398,24 +1472,41 @@
             };
 
             const handleDeleteSet = async (targetSet) => {
-                if (!targetSet?.id || targetSet.system) return;
-                setSavedSets((prev) => {
-                    const normalized = normalizeSavedSets(prev, savedLibraryRef.current);
-                    const target = normalized.find((setRecord) => setRecord.id === targetSet.id);
-                    if (!target) return normalized;
-                    const rejectsId = normalized.some((setRecord) => setRecord.id === REJECTS_SET_ID) ? REJECTS_SET_ID : resolveFailTargetSetId(target, normalized);
-                    const next = normalized
-                        .filter((setRecord) => setRecord.id !== target.id)
-                        .map((setRecord) => {
-                            if (setRecord.id !== rejectsId) return setRecord;
-                            return {
-                                ...setRecord,
-                                itemIds: [...setRecord.itemIds, ...target.itemIds.filter((itemId) => !setRecord.itemIds.includes(itemId))]
-                            };
-                        });
-                    return normalizeSavedSets(next, savedLibraryRef.current);
+                if (!targetSet?.items?.length) return;
+                const currentLibrary = savedLibraryRef.current || savedLibrary;
+                const currentResults = dreamResultsRef.current || dreamState.results;
+                const removeIds = new Set(targetSet.items.map(it => it.id));
+                const removeStorageKeys = new Set(targetSet.items.map(it => it.storageKey).filter(Boolean));
+
+                const removedItems = currentLibrary.filter(it => removeIds.has(it.id) || (it.storageKey && removeStorageKeys.has(it.storageKey)));
+                const removedResults = currentResults.filter(it => removeIds.has(it.id) || (it.storageKey && removeStorageKeys.has(it.storageKey)));
+                const nextLibrary = currentLibrary.filter(it => !removeIds.has(it.id) && (!it.storageKey || !removeStorageKeys.has(it.storageKey)));
+                const nextResults = removeResultsByFillMode(
+                    currentResults,
+                    (it) => removeIds.has(it.id) || (it.storageKey && removeStorageKeys.has(it.storageKey)),
+                    dreamParams.resultFillMode
+                );
+
+                setSavedLibrary(nextLibrary);
+                setDreamState(prev => ({ ...prev, results: nextResults }));
+
+                removedResults.forEach((it) => {
+                    if (it?.url && typeof it.url === 'string' && it.url.startsWith('blob:')) {
+                        URL.revokeObjectURL(it.url);
+                    }
                 });
-                setSelectedSetId((prev) => prev === targetSet.id ? PRIMARY_SET_ID : prev);
+
+                const keysToCleanup = [...new Set([...removedItems, ...removedResults].map(it => it.storageKey).filter(Boolean))];
+                for (const key of keysToCleanup) {
+                    await cleanupStorageIfUnreferenced(key, nextLibrary, nextResults);
+                }
+
+                pushDeleteHistory({
+                    id: `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    type: 'set',
+                    label: targetSet.name || 'Set',
+                    items: removedItems
+                });
             };
 
             const handleDeleteAllGlobal = async () => {
@@ -1430,7 +1521,6 @@
                 });
 
                 setSavedLibrary([]);
-                setSavedSets(normalizeSavedSets([], []));
                 setDreamState(prev => ({ ...prev, results: [] }));
 
                 const keysToCleanup = [...new Set(
@@ -1455,6 +1545,96 @@
                     if (m.id !== id) return m;
                     return typeof updater === 'function' ? updater(m) : { ...m, ...updater };
                 }));
+            };
+
+            const syncPreviewPresetUpdate = (updater) => {
+                setPreviewPresets((prev) => {
+                    const basePresets = Array.isArray(prev) && prev.length ? prev : [createDefaultPreviewPreset()];
+                    const next = typeof updater === 'function' ? updater(basePresets) : basePresets;
+                    return Array.isArray(next) && next.length ? next : [createDefaultPreviewPreset()];
+                });
+            };
+
+            const updateActivePreviewPreset = (updater) => {
+                syncPreviewPresetUpdate((prev) => prev.map((preset) => {
+                    if (preset.id !== previewActivePresetId) return preset;
+                    const nextPreset = typeof updater === 'function' ? updater(clonePreviewPreset(preset)) : preset;
+                    const validated = validatePreviewPreset(nextPreset);
+                    return validated.sanitizedPreset || sanitizePreviewPreset(nextPreset);
+                }));
+            };
+
+            const createPreviewPresetFromDefault = () => {
+                const preset = createDefaultPreviewPreset();
+                preset.id = createPreviewPresetId();
+                preset.name = `Preset ${previewPresets.length + 1}`;
+                preset.layers = [createDefaultPreviewLayer(0)];
+                preset.layers[0].id = createPreviewLayerId(0);
+                return preset;
+            };
+
+            const withToolkit = useCallback(async (action) => {
+                try {
+                    toolkitBridgeRef.current.setBaseUrl(toolkitBaseUrl);
+                    setToolkitLastError('');
+                    return await action(toolkitBridgeRef.current);
+                } catch (error) {
+                    setToolkitLastError(error?.message || 'Toolkit request failed.');
+                    throw error;
+                }
+            }, [toolkitBaseUrl]);
+
+            const refreshToolkitHealth = useCallback(async () => {
+                const payload = await withToolkit((bridge) => bridge.health());
+                setToolkitHealth(payload);
+                return payload;
+            }, [withToolkit]);
+
+            const refreshToolkitCatalog = useCallback(async () => {
+                const payload = await withToolkit((bridge) => bridge.catalog());
+                setToolkitCatalog(payload.categories || []);
+                return payload;
+            }, [withToolkit]);
+
+            const refreshToolkitLogs = useCallback(async () => {
+                const payload = await withToolkit((bridge) => bridge.logs());
+                setToolkitLogs(payload.entries || []);
+                return payload;
+            }, [withToolkit]);
+
+            const refreshToolkitLatestRun = useCallback(async () => {
+                const payload = await withToolkit((bridge) => bridge.latestRun());
+                setToolkitLastRun(payload);
+                return payload;
+            }, [withToolkit]);
+
+            const updatePreviewLayerById = (layerId, updater) => {
+                updateActivePreviewPreset((preset) => ({
+                    ...preset,
+                    layers: preset.layers.map((layer) => layer.id === layerId ? updater(clonePreviewPreset({ layers: [layer] }).layers[0]) : layer)
+                }));
+            };
+
+            const applyPreviewJsonDraft = (text) => {
+                try {
+                    const parsed = JSON.parse(text);
+                    const validation = validatePreviewPreset(parsed);
+                    if (!validation.valid) {
+                        setPreviewJsonError(validation.errors.join('\n'));
+                        setPreviewRuntimeStatus('invalid_preset');
+                        return false;
+                    }
+                    const sanitized = validation.sanitizedPreset;
+                    sanitized.id = previewActivePresetId || sanitized.id || createPreviewPresetId();
+                    syncPreviewPresetUpdate((prev) => prev.map((preset) => preset.id === sanitized.id ? sanitized : preset));
+                    setPreviewSelectedLayerId(sanitized.layers[0]?.id || null);
+                    setPreviewJsonError('');
+                    return true;
+                } catch (error) {
+                    setPreviewJsonError(error?.message || 'Invalid JSON.');
+                    setPreviewRuntimeStatus('invalid_preset');
+                    return false;
+                }
             };
 
 	            return {
@@ -1621,40 +1801,192 @@
                         if (removed?.storageKey) await cleanupStorageIfUnreferenced(removed.storageKey, nextLibrary, nextResults);
                     }
                 },
+                preview: {
+                    supported: previewSupported,
+                    status: previewRuntimeStatus,
+                    activeSourceId: previewActiveSourceId,
+                    activeSourceItem: activePreviewSourceItem,
+                    sourceItems: savedLibrary,
+                    activePresetId: activePreviewPreset?.id || null,
+                    activePreset: activePreviewPreset,
+                    presets: previewPresets,
+                    selectedLayerId: activePreviewLayer?.id || null,
+                    selectedLayer: activePreviewLayer,
+                    expandedModuleKey: activePreviewExpandedModule,
+                    advancedOpen: activePreviewAdvancedOpen,
+                    isPlaying: previewIsPlaying,
+                    timeScale: previewTimeScale,
+                    jsonDraft: previewJsonDraft,
+                    jsonError: previewJsonError,
+                    setCanvasHost: (node) => { previewCanvasRef.current = node; },
+                    selectSource: (id) => setPreviewActiveSourceId(id || null),
+                    selectPreset: (id) => {
+                        const next = previewPresets.find((preset) => preset.id === id);
+                        if (!next) return;
+                        setPreviewActivePresetId(next.id);
+                        setPreviewSelectedLayerId(next.layers?.[0]?.id || null);
+                        setPreviewJsonError('');
+                    },
+                    createPreset: () => {
+                        const preset = createPreviewPresetFromDefault();
+                        syncPreviewPresetUpdate((prev) => [...prev, preset]);
+                        setPreviewActivePresetId(preset.id);
+                        setPreviewSelectedLayerId(preset.layers[0]?.id || null);
+                        setPreviewJsonDraft(JSON.stringify(preset, null, 2));
+                    },
+                    duplicatePreset: (id) => {
+                        const source = previewPresets.find((preset) => preset.id === (id || previewActivePresetId));
+                        if (!source) return;
+                        const next = clonePreviewPreset(source);
+                        next.id = createPreviewPresetId();
+                        next.name = `${source.name} Copy`;
+                        next.layers = next.layers.map((layer, index) => ({ ...layer, id: createPreviewLayerId(index) }));
+                        syncPreviewPresetUpdate((prev) => [...prev, next]);
+                        setPreviewActivePresetId(next.id);
+                        setPreviewSelectedLayerId(next.layers[0]?.id || null);
+                    },
+                    renamePreset: (id, name) => {
+                        syncPreviewPresetUpdate((prev) => prev.map((preset) => preset.id === (id || previewActivePresetId) ? { ...preset, name: String(name || '').trim() || preset.name } : preset));
+                    },
+                    deletePreset: (id) => {
+                        const targetId = id || previewActivePresetId;
+                        if (!targetId) return;
+                        syncPreviewPresetUpdate((prev) => {
+                            if (prev.length <= 1) {
+                                const fallback = createDefaultPreviewPreset();
+                                setPreviewActivePresetId(fallback.id);
+                                setPreviewSelectedLayerId(fallback.layers[0]?.id || null);
+                                return [fallback];
+                            }
+                            const next = prev.filter((preset) => preset.id !== targetId);
+                            const fallback = next[0];
+                            setPreviewActivePresetId(fallback.id);
+                            setPreviewSelectedLayerId(fallback.layers[0]?.id || null);
+                            return next;
+                        });
+                    },
+                    replaceWithDefault: () => {
+                        const replacement = createDefaultPreviewPreset();
+                        replacement.id = previewActivePresetId || replacement.id;
+                        updateActivePreviewPreset(() => replacement);
+                        setPreviewSelectedLayerId(replacement.layers[0]?.id || null);
+                        setPreviewJsonError('');
+                    },
+                    resetSceneCamera: () => {
+                        const defaults = createDefaultPreviewPreset().scene;
+                        updateActivePreviewPreset((preset) => ({
+                            ...preset,
+                            scene: {
+                                ...preset.scene,
+                                cameraFov: defaults.cameraFov,
+                                cameraDistance: defaults.cameraDistance,
+                                cameraPitch: defaults.cameraPitch,
+                                cameraYaw: defaults.cameraYaw
+                            }
+                        }));
+                    },
+                    updateSceneField: (key, value) => updateActivePreviewPreset((preset) => ({ ...preset, scene: { ...preset.scene, [key]: value } })),
+                    updateSceneFields: (patch) => updateActivePreviewPreset((preset) => ({ ...preset, scene: { ...preset.scene, ...(patch || {}) } })),
+                    addLayer: () => updateActivePreviewPreset((preset) => {
+                        const layer = createDefaultPreviewLayer(preset.layers.length);
+                        layer.id = createPreviewLayerId(preset.layers.length);
+                        setPreviewSelectedLayerId(layer.id);
+                        return { ...preset, layers: [...preset.layers, layer] };
+                    }),
+                    duplicateLayer: (id) => updateActivePreviewPreset((preset) => {
+                        const source = preset.layers.find((layer) => layer.id === (id || previewSelectedLayerId));
+                        if (!source) return preset;
+                        const duplicate = clonePreviewPreset({ layers: [source] }).layers[0];
+                        duplicate.id = createPreviewLayerId(preset.layers.length);
+                        duplicate.name = `${source.name} Copy`;
+                        setPreviewSelectedLayerId(duplicate.id);
+                        return { ...preset, layers: [...preset.layers, duplicate] };
+                    }),
+                    deleteLayer: (id) => updateActivePreviewPreset((preset) => {
+                        if (preset.layers.length <= 1) return preset;
+                        const targetId = id || previewSelectedLayerId;
+                        const nextLayers = preset.layers.filter((layer) => layer.id !== targetId);
+                        setPreviewSelectedLayerId(nextLayers[0]?.id || null);
+                        return { ...preset, layers: nextLayers };
+                    }),
+                    reorderLayer: (id, direction) => updateActivePreviewPreset((preset) => {
+                        const index = preset.layers.findIndex((layer) => layer.id === id);
+                        const target = index + direction;
+                        if (index < 0 || target < 0 || target >= preset.layers.length) return preset;
+                        const nextLayers = [...preset.layers];
+                        [nextLayers[index], nextLayers[target]] = [nextLayers[target], nextLayers[index]];
+                        return { ...preset, layers: nextLayers };
+                    }),
+                    selectLayer: (id) => setPreviewSelectedLayerId(id || null),
+                    setExpandedModule: (layerId, moduleKey) => {
+                        const key = getPreviewLayerUiKey(previewActivePresetId, layerId || previewSelectedLayerId);
+                        setPreviewExpandedModules((prev) => {
+                            const next = { ...(prev || {}) };
+                            if (!moduleKey) delete next[key];
+                            else next[key] = moduleKey;
+                            return next;
+                        });
+                    },
+                    toggleAdvancedPanel: (layerId) => {
+                        const key = getPreviewLayerUiKey(previewActivePresetId, layerId || previewSelectedLayerId);
+                        setPreviewAdvancedPanels((prev) => ({ ...(prev || {}), [key]: !prev?.[key] }));
+                    },
+                    updateLayerSection: (layerId, sectionKey, patch) => updatePreviewLayerById(layerId, (layer) => {
+                        if (sectionKey === 'root') return { ...layer, ...patch };
+                        return { ...layer, [sectionKey]: { ...layer[sectionKey], ...patch } };
+                    }),
+                    setJsonDraft: (text) => setPreviewJsonDraft(text),
+                    applyJsonDraft: (text) => applyPreviewJsonDraft(text),
+                    resetJsonDraft: () => {
+                        if (!activePreviewPreset) return;
+                        setPreviewJsonDraft(JSON.stringify(activePreviewPreset, null, 2));
+                        setPreviewJsonError('');
+                    },
+                    resetSimulation: () => {
+                        if (previewRuntimeRef.current) previewRuntimeRef.current.resetSimulation();
+                    },
+                    setPlaying: (value) => setPreviewIsPlaying(!!value),
+                    setTimeScale: (value) => setPreviewTimeScale(clampPreviewValue(Number(value) || 0, 0, 3))
+                },
+                toolkit: {
+                    baseUrl: toolkitBaseUrl,
+                    setBaseUrl: (value) => {
+                        const nextValue = String(value || TOOLKIT_DEFAULT_URL).trim() || TOOLKIT_DEFAULT_URL;
+                        setToolkitBaseUrl(nextValue);
+                        toolkitBridgeRef.current.setBaseUrl(nextValue);
+                    },
+                    health: toolkitHealth,
+                    catalog: toolkitCatalog,
+                    lastRun: toolkitLastRun,
+                    logs: toolkitLogs,
+                    lastError: toolkitLastError,
+                    checkHealth: async () => await refreshToolkitHealth(),
+                    loadCatalog: async () => await refreshToolkitCatalog(),
+                    loadLatestRun: async () => await refreshToolkitLatestRun(),
+                    loadLogs: async () => await refreshToolkitLogs(),
+                    runTool: async (category, tool, args = {}) => {
+                        const payload = await withToolkit((bridge) => bridge.run(category, tool, args));
+                        setToolkitLastRun(payload);
+                        await refreshToolkitLogs();
+                        return payload;
+                    }
+                },
 	                library: {
 	                    items: savedLibrary,
 	                    sets,
-                    selectedSet,
-                    selectedSetId,
-                    setSelectedSetId,
-                    activeTargetSet,
-                    activeTargetSetId,
-                    setActiveTargetSetId,
 	                    packConfig,
 	                    setPackConfig,
+	                    reorganizePacks,
 	                    reorderByDrag,
                     sendToFront,
                     sendToBack,
-                    getItemSetId,
-                    getSetNameById,
-                    createSet,
-	                    onSave: (it) => {
-                            if (!it?.id) return;
-                            const persistedItem = { ...it, url: null };
-                            const currentLibrary = savedLibraryRef.current || [];
-                            const existingItem = currentLibrary.find((item) => item.id === persistedItem.id);
-                            const nextLibrary = existingItem
-                                ? currentLibrary.map((item) => item.id === persistedItem.id ? { ...item, ...persistedItem } : item)
-                                : [...currentLibrary, persistedItem];
-                            setSavedLibrary(nextLibrary);
-                            const routing = assignItemsToSetWithRouting(
-                                savedSetsRef.current || [],
-                                [{ item: persistedItem, targetSetId: activeTargetSetId || PRIMARY_SET_ID }],
-                                nextLibrary
-                            );
-                            setSavedSets(routing.sets);
-                        },
+	                    onSave: (it) => setSavedLibrary(p => [...p, { ...it, url: null }]),
 	                    onLoad: (cfg) => { setSteps(hydrateConfigDefaults(cfg)); setActiveTab('builder'); },
+                    openInPreview: (id) => {
+                        if (!id) return;
+                        setPreviewActiveSourceId(id);
+                        setActiveTab('preview');
+                    },
                     onDelete: async (id) => {
                         const currentLibrary = savedLibraryRef.current || savedLibrary;
                         const currentResults = dreamResultsRef.current || dreamState.results;
@@ -1668,10 +2000,6 @@
                             dreamParams.resultFillMode
                         );
                         setSavedLibrary(nextLibrary);
-                        setSavedSets((prev) => normalizeSavedSets(prev.map((setRecord) => ({
-                            ...setRecord,
-                            itemIds: setRecord.itemIds.filter((itemId) => itemId !== id)
-                        })), nextLibrary));
                         setDreamState(prev => ({ ...prev, results: nextResults }));
                         currentResults.forEach((it) => {
                             const sameRef = it.id === id || (targetStorageKey && it.storageKey === targetStorageKey);
@@ -1690,10 +2018,6 @@
                         }
                     },
                     renameSet: handleRenameSet,
-                    updateSetPolicy,
-                    updateSetQuality,
-                    toggleSetQualityEnabled,
-                    toggleSetQualityExpanded,
                     exportSet: handleExportSet,
                     deleteSet: handleDeleteSet,
                     deleteAllSets: handleDeleteAllGlobal,

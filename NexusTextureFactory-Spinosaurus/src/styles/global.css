@@ -143,3 +143,7 @@
         .config-scroll::-webkit-scrollbar-thumb {
             background: #444;
         }
+
+        .preview-canvas-host {
+            touch-action: none;
+        }

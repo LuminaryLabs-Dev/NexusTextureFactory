@@ -5,9 +5,14 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "start": "serve -l 3000 .",
-    "dev": "serve -l 3000 ."
+    "dev": "serve -l 3000 .",
+    "toolkit:http": "node tools/toolkit-http/server.mjs",
+    "toolkit:dev": "node tools/toolkit-http/dev.mjs"
   },
   "devDependencies": {
-    "serve": "^14.2.4"
+    "@fastify/cors": "^11.2.0",
+    "fastify": "^5.8.2",
+    "serve": "^14.2.4",
+    "zod": "^4.3.6"
   }
 }
