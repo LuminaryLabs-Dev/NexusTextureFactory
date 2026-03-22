@@ -37,12 +37,14 @@
             const [previewJsonDraft, setPreviewJsonDraft] = useState(JSON.stringify(createDefaultPreviewPreset(), null, 2));
             const [previewJsonError, setPreviewJsonError] = useState('');
             const [previewSelectedLayerId, setPreviewSelectedLayerId] = useState('layer-1');
-            const [humanViewBaseUrl, setHumanViewBaseUrl] = useState(HUMAN_VIEW_DEFAULT_URL);
-            const [humanViewHealth, setHumanViewHealth] = useState({ status: 'idle', server_ready: false, browser_ready: false, app_ready: false, active_url: '', last_error: '' });
-            const [humanViewLoopState, setHumanViewLoopState] = useState({ running: false, iteration: 0, last_verdict: '', latest_capture_paths: [] });
-            const [humanViewLatestCapture, setHumanViewLatestCapture] = useState(null);
-            const [humanViewConsole, setHumanViewConsole] = useState([]);
-            const [humanViewLastError, setHumanViewLastError] = useState('');
+            const [previewExpandedModules, setPreviewExpandedModules] = useState({});
+            const [previewAdvancedPanels, setPreviewAdvancedPanels] = useState({});
+            const [toolkitBaseUrl, setToolkitBaseUrl] = useState(TOOLKIT_DEFAULT_URL);
+            const [toolkitHealth, setToolkitHealth] = useState({ status: 'idle', server_ready: false, toolkit_ready: false, last_error: '' });
+            const [toolkitCatalog, setToolkitCatalog] = useState([]);
+            const [toolkitLastRun, setToolkitLastRun] = useState(null);
+            const [toolkitLogs, setToolkitLogs] = useState([]);
+            const [toolkitLastError, setToolkitLastError] = useState('');
 	            const eR = useRef(null); const bER = useRef(null);
 	            const generationEnginesRef = useRef([]);
 	            const hasHydratedMetaRef = useRef(false);
@@ -57,7 +59,8 @@
             const previewCanvasRef = useRef(null);
             const previewAnimationFrameRef = useRef(null);
             const previewSourceLoadIdRef = useRef(0);
-            const humanViewBridgeRef = useRef(new HumanViewHttpBridge(HUMAN_VIEW_DEFAULT_URL));
+            const toolkitBridgeRef = useRef(new ToolkitToolBridge(TOOLKIT_DEFAULT_URL));
+            const getPreviewLayerUiKey = useCallback((presetId, layerId) => `${String(presetId || 'preset')}::${String(layerId || 'layer')}`, []);
             const clampSetGridColumns = (value) => {
                 const parsed = Number.parseInt(value, 10);
                 if (!Number.isFinite(parsed)) return DEFAULT_SET_GRID_COLUMNS;
@@ -67,24 +70,39 @@
 	            useEffect(() => { eR.current = new TextureEngine(256, 256); bER.current = new TextureEngine(256, 256); }, []);
 	            useEffect(() => {
                 if (!eR.current) return;
-                eR.current.renderStack(steps);
-                const nextPreviewUrls = steps.map((_, i) => eR.current.getTextureUrl(i, { mode: maskViewMode }));
-                const nextFinalPreviewUrl = nextPreviewUrls[steps.length - 1] || null;
-                setPreviewUrls((prev) => {
-                    if (prev.length === nextPreviewUrls.length && prev.every((url, idx) => url === nextPreviewUrls[idx])) return prev;
-                    return nextPreviewUrls;
-                });
-                setFinalPreviewUrl((prev) => prev === nextFinalPreviewUrl ? prev : nextFinalPreviewUrl);
-                setSteps((prev) => {
-                    let changed = prev.length !== nextPreviewUrls.length;
-                    const next = prev.map((step, idx) => {
-                        const previewUrl = nextPreviewUrls[idx] || null;
-                        if (step.previewUrl === previewUrl) return step;
-                        changed = true;
-                        return { ...step, previewUrl };
+                try {
+                    eR.current.renderStack(steps);
+                    const nextPreviewUrls = steps.map((_, i) => eR.current.getTextureUrl(i, { mode: maskViewMode }));
+                    const nextFinalPreviewUrl = nextPreviewUrls[steps.length - 1] || null;
+                    setPreviewUrls((prev) => {
+                        if (prev.length === nextPreviewUrls.length && prev.every((url, idx) => url === nextPreviewUrls[idx])) return prev;
+                        return nextPreviewUrls;
                     });
-                    return changed ? next : prev;
-                });
+                    setFinalPreviewUrl((prev) => prev === nextFinalPreviewUrl ? prev : nextFinalPreviewUrl);
+                    setSteps((prev) => {
+                        let changed = prev.length !== nextPreviewUrls.length;
+                        const next = prev.map((step, idx) => {
+                            const previewUrl = nextPreviewUrls[idx] || null;
+                            if (step.previewUrl === previewUrl) return step;
+                            changed = true;
+                            return { ...step, previewUrl };
+                        });
+                        return changed ? next : prev;
+                    });
+                } catch (error) {
+                    console.error(error);
+                    setPreviewUrls((prev) => prev.length ? [] : prev);
+                    setFinalPreviewUrl((prev) => prev === null ? prev : null);
+                    setSteps((prev) => {
+                        let changed = false;
+                        const next = prev.map((step) => {
+                            if (!step.previewUrl) return step;
+                            changed = true;
+                            return { ...step, previewUrl: null };
+                        });
+                        return changed ? next : prev;
+                    });
+                }
             }, [steps, maskViewMode]);
 	            useEffect(() => { savedLibraryRef.current = savedLibrary; }, [savedLibrary]);
 	            useEffect(() => { dreamResultsRef.current = dreamState.results; }, [dreamState.results]);
@@ -268,14 +286,16 @@
                             if (typeof parsed.selectedLayerId === 'string') setPreviewSelectedLayerId(parsed.selectedLayerId);
                             if (typeof parsed.isPlaying === 'boolean') setPreviewIsPlaying(parsed.isPlaying);
                             if (Number.isFinite(parsed.timeScale)) setPreviewTimeScale(clampPreviewValue(parsed.timeScale, 0, 3));
+                            if (parsed.expandedModules && typeof parsed.expandedModules === 'object') setPreviewExpandedModules(parsed.expandedModules);
+                            if (parsed.advancedPanels && typeof parsed.advancedPanels === 'object') setPreviewAdvancedPanels(parsed.advancedPanels);
                         }
                     }
-                    const rawHumanViewUi = localStorage.getItem(HUMAN_VIEW_UI_STORAGE_KEY);
-                    if (rawHumanViewUi) {
-                        const parsed = JSON.parse(rawHumanViewUi);
+                    const rawToolkitUi = localStorage.getItem(TOOLKIT_UI_STORAGE_KEY);
+                    if (rawToolkitUi) {
+                        const parsed = JSON.parse(rawToolkitUi);
                         if (parsed && typeof parsed === 'object' && typeof parsed.baseUrl === 'string') {
-                            setHumanViewBaseUrl(parsed.baseUrl);
-                            humanViewBridgeRef.current.setBaseUrl(parsed.baseUrl);
+                            setToolkitBaseUrl(parsed.baseUrl);
+                            toolkitBridgeRef.current.setBaseUrl(parsed.baseUrl);
                         }
                     }
                 } catch (_) { }
@@ -371,10 +391,12 @@
                             activePresetId: previewActivePresetId,
                             selectedLayerId: previewSelectedLayerId,
                             isPlaying: previewIsPlaying,
-                            timeScale: previewTimeScale
+                            timeScale: previewTimeScale,
+                            expandedModules: previewExpandedModules,
+                            advancedPanels: previewAdvancedPanels
                         }));
-                        localStorage.setItem(HUMAN_VIEW_UI_STORAGE_KEY, JSON.stringify({
-                            baseUrl: humanViewBaseUrl
+                        localStorage.setItem(TOOLKIT_UI_STORAGE_KEY, JSON.stringify({
+                            baseUrl: toolkitBaseUrl
                         }));
                     } catch (_) { }
                 }, 220);
@@ -384,12 +406,21 @@
 	                        persistTimerRef.current = null;
 	                    }
 	                };
-            }, [savedLibrary, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, useWorkbenchSeed, maskViewMode, gridColumns, packConfig, flipbookConfig, previewPresets, previewActiveSourceId, previewActivePresetId, previewSelectedLayerId, previewIsPlaying, previewTimeScale, humanViewBaseUrl]);
+            }, [savedLibrary, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, useWorkbenchSeed, maskViewMode, gridColumns, packConfig, flipbookConfig, previewPresets, previewActiveSourceId, previewActivePresetId, previewSelectedLayerId, previewIsPlaying, previewTimeScale, previewExpandedModules, previewAdvancedPanels, toolkitBaseUrl]);
 
             const previewSupported = useMemo(() => isPreviewWebGL2Supported(), []);
             const activePreviewSourceItem = useMemo(() => savedLibrary.find((it) => it.id === previewActiveSourceId) || null, [savedLibrary, previewActiveSourceId]);
             const activePreviewPreset = useMemo(() => previewPresets.find((preset) => preset.id === previewActivePresetId) || previewPresets[0] || null, [previewPresets, previewActivePresetId]);
             const activePreviewLayer = useMemo(() => activePreviewPreset?.layers?.find((layer) => layer.id === previewSelectedLayerId) || activePreviewPreset?.layers?.[0] || null, [activePreviewPreset, previewSelectedLayerId]);
+            const activePreviewLayerUiKey = useMemo(() => getPreviewLayerUiKey(activePreviewPreset?.id, activePreviewLayer?.id), [activePreviewPreset?.id, activePreviewLayer?.id, getPreviewLayerUiKey]);
+            const activePreviewExpandedModule = useMemo(() => {
+                if (!activePreviewLayer) return 'main';
+                const stored = previewExpandedModules?.[activePreviewLayerUiKey];
+                if (stored) return stored;
+                const firstExpanded = PREVIEW_MODULE_KEYS.find((key) => activePreviewLayer.modules?.[key]?.expanded);
+                return firstExpanded || 'main';
+            }, [activePreviewLayer, activePreviewLayerUiKey, previewExpandedModules]);
+            const activePreviewAdvancedOpen = !!previewAdvancedPanels?.[activePreviewLayerUiKey];
 
             useEffect(() => {
                 if (!activePreviewPreset) return;
@@ -506,7 +537,7 @@
                 }
                 try {
                     previewRuntimeRef.current.setPreset(validation.sanitizedPreset);
-                    setPreviewRuntimeStatus(activePreviewSourceItem ? 'running' : 'missing_source');
+                    setPreviewRuntimeStatus(activePreviewSourceItem ? 'running' : 'running_fallback_sprite');
                 } catch (error) {
                     console.error(error);
                     setPreviewRuntimeStatus('error');
@@ -527,7 +558,7 @@
                 if (!previewRuntimeRef.current || activeTab !== 'preview') return;
                 if (!activePreviewSourceItem) {
                     previewRuntimeRef.current.setSourceImage(null);
-                    setPreviewRuntimeStatus(activePreviewPreset ? 'missing_source' : 'idle');
+                    setPreviewRuntimeStatus(activePreviewPreset ? 'running_fallback_sprite' : 'idle');
                     return;
                 }
                 const loadId = ++previewSourceLoadIdRef.current;
@@ -1516,29 +1547,6 @@
                 }));
             };
 
-            const withHumanView = useCallback(async (action) => {
-                try {
-                    humanViewBridgeRef.current.setBaseUrl(humanViewBaseUrl);
-                    setHumanViewLastError('');
-                    return await action(humanViewBridgeRef.current);
-                } catch (error) {
-                    setHumanViewLastError(error?.message || 'Human View request failed.');
-                    throw error;
-                }
-            }, [humanViewBaseUrl]);
-
-            const refreshHumanViewLoopStatus = useCallback(async () => {
-                const payload = await withHumanView((bridge) => bridge.loopStatus());
-                setHumanViewLoopState(payload);
-                return payload;
-            }, [withHumanView]);
-
-            const refreshHumanViewHealth = useCallback(async () => {
-                const payload = await withHumanView((bridge) => bridge.health());
-                setHumanViewHealth(payload);
-                return payload;
-            }, [withHumanView]);
-
             const syncPreviewPresetUpdate = (updater) => {
                 setPreviewPresets((prev) => {
                     const basePresets = Array.isArray(prev) && prev.length ? prev : [createDefaultPreviewPreset()];
@@ -1564,6 +1572,41 @@
                 preset.layers[0].id = createPreviewLayerId(0);
                 return preset;
             };
+
+            const withToolkit = useCallback(async (action) => {
+                try {
+                    toolkitBridgeRef.current.setBaseUrl(toolkitBaseUrl);
+                    setToolkitLastError('');
+                    return await action(toolkitBridgeRef.current);
+                } catch (error) {
+                    setToolkitLastError(error?.message || 'Toolkit request failed.');
+                    throw error;
+                }
+            }, [toolkitBaseUrl]);
+
+            const refreshToolkitHealth = useCallback(async () => {
+                const payload = await withToolkit((bridge) => bridge.health());
+                setToolkitHealth(payload);
+                return payload;
+            }, [withToolkit]);
+
+            const refreshToolkitCatalog = useCallback(async () => {
+                const payload = await withToolkit((bridge) => bridge.catalog());
+                setToolkitCatalog(payload.categories || []);
+                return payload;
+            }, [withToolkit]);
+
+            const refreshToolkitLogs = useCallback(async () => {
+                const payload = await withToolkit((bridge) => bridge.logs());
+                setToolkitLogs(payload.entries || []);
+                return payload;
+            }, [withToolkit]);
+
+            const refreshToolkitLatestRun = useCallback(async () => {
+                const payload = await withToolkit((bridge) => bridge.latestRun());
+                setToolkitLastRun(payload);
+                return payload;
+            }, [withToolkit]);
 
             const updatePreviewLayerById = (layerId, updater) => {
                 updateActivePreviewPreset((preset) => ({
@@ -1769,6 +1812,8 @@
                     presets: previewPresets,
                     selectedLayerId: activePreviewLayer?.id || null,
                     selectedLayer: activePreviewLayer,
+                    expandedModuleKey: activePreviewExpandedModule,
+                    advancedOpen: activePreviewAdvancedOpen,
                     isPlaying: previewIsPlaying,
                     timeScale: previewTimeScale,
                     jsonDraft: previewJsonDraft,
@@ -1827,7 +1872,21 @@
                         setPreviewSelectedLayerId(replacement.layers[0]?.id || null);
                         setPreviewJsonError('');
                     },
+                    resetSceneCamera: () => {
+                        const defaults = createDefaultPreviewPreset().scene;
+                        updateActivePreviewPreset((preset) => ({
+                            ...preset,
+                            scene: {
+                                ...preset.scene,
+                                cameraFov: defaults.cameraFov,
+                                cameraDistance: defaults.cameraDistance,
+                                cameraPitch: defaults.cameraPitch,
+                                cameraYaw: defaults.cameraYaw
+                            }
+                        }));
+                    },
                     updateSceneField: (key, value) => updateActivePreviewPreset((preset) => ({ ...preset, scene: { ...preset.scene, [key]: value } })),
+                    updateSceneFields: (patch) => updateActivePreviewPreset((preset) => ({ ...preset, scene: { ...preset.scene, ...(patch || {}) } })),
                     addLayer: () => updateActivePreviewPreset((preset) => {
                         const layer = createDefaultPreviewLayer(preset.layers.length);
                         layer.id = createPreviewLayerId(preset.layers.length);
@@ -1859,6 +1918,19 @@
                         return { ...preset, layers: nextLayers };
                     }),
                     selectLayer: (id) => setPreviewSelectedLayerId(id || null),
+                    setExpandedModule: (layerId, moduleKey) => {
+                        const key = getPreviewLayerUiKey(previewActivePresetId, layerId || previewSelectedLayerId);
+                        setPreviewExpandedModules((prev) => {
+                            const next = { ...(prev || {}) };
+                            if (!moduleKey) delete next[key];
+                            else next[key] = moduleKey;
+                            return next;
+                        });
+                    },
+                    toggleAdvancedPanel: (layerId) => {
+                        const key = getPreviewLayerUiKey(previewActivePresetId, layerId || previewSelectedLayerId);
+                        setPreviewAdvancedPanels((prev) => ({ ...(prev || {}), [key]: !prev?.[key] }));
+                    },
                     updateLayerSection: (layerId, sectionKey, patch) => updatePreviewLayerById(layerId, (layer) => {
                         if (sectionKey === 'root') return { ...layer, ...patch };
                         return { ...layer, [sectionKey]: { ...layer[sectionKey], ...patch } };
@@ -1876,56 +1948,28 @@
                     setPlaying: (value) => setPreviewIsPlaying(!!value),
                     setTimeScale: (value) => setPreviewTimeScale(clampPreviewValue(Number(value) || 0, 0, 3))
                 },
-                humanView: {
-                    baseUrl: humanViewBaseUrl,
+                toolkit: {
+                    baseUrl: toolkitBaseUrl,
                     setBaseUrl: (value) => {
-                        const nextValue = String(value || HUMAN_VIEW_DEFAULT_URL).trim() || HUMAN_VIEW_DEFAULT_URL;
-                        setHumanViewBaseUrl(nextValue);
-                        humanViewBridgeRef.current.setBaseUrl(nextValue);
+                        const nextValue = String(value || TOOLKIT_DEFAULT_URL).trim() || TOOLKIT_DEFAULT_URL;
+                        setToolkitBaseUrl(nextValue);
+                        toolkitBridgeRef.current.setBaseUrl(nextValue);
                     },
-                    health: humanViewHealth,
-                    loopState: humanViewLoopState,
-                    latestCapture: humanViewLatestCapture,
-                    consoleEntries: humanViewConsole,
-                    lastError: humanViewLastError,
-                    checkHealth: async () => await refreshHumanViewHealth(),
-                    startSession: async () => {
-                        const payload = await withHumanView((bridge) => bridge.startSession({ width: 1600, height: 1000, headless: false }));
-                        await refreshHumanViewHealth();
+                    health: toolkitHealth,
+                    catalog: toolkitCatalog,
+                    lastRun: toolkitLastRun,
+                    logs: toolkitLogs,
+                    lastError: toolkitLastError,
+                    checkHealth: async () => await refreshToolkitHealth(),
+                    loadCatalog: async () => await refreshToolkitCatalog(),
+                    loadLatestRun: async () => await refreshToolkitLatestRun(),
+                    loadLogs: async () => await refreshToolkitLogs(),
+                    runTool: async (category, tool, args = {}) => {
+                        const payload = await withToolkit((bridge) => bridge.run(category, tool, args));
+                        setToolkitLastRun(payload);
+                        await refreshToolkitLogs();
                         return payload;
-                    },
-                    openLocalApp: async () => {
-                        const localUrl = 'http://127.0.0.1:3014/';
-                        const payload = await withHumanView((bridge) => bridge.openApp(localUrl));
-                        await refreshHumanViewHealth();
-                        return payload;
-                    },
-                    captureFullApp: async () => {
-                        const payload = await withHumanView((bridge) => bridge.captureFullApp('settings-full-app', true));
-                        setHumanViewLatestCapture(payload);
-                        return payload;
-                    },
-                    captureViewport: async () => {
-                        const payload = await withHumanView((bridge) => bridge.captureViewport('settings-viewport'));
-                        setHumanViewLatestCapture(payload);
-                        return payload;
-                    },
-                    inspectConsole: async () => {
-                        const payload = await withHumanView((bridge) => bridge.inspectConsole());
-                        setHumanViewConsole(payload.entries || []);
-                        return payload;
-                    },
-                    runPreviewLoop: async () => {
-                        const payload = await withHumanView((bridge) => bridge.runLoop('preview_visibility', 'http://127.0.0.1:3014/', 3));
-                        await refreshHumanViewLoopStatus();
-                        return payload;
-                    },
-                    stopLoop: async () => {
-                        const payload = await withHumanView((bridge) => bridge.stopLoop());
-                        await refreshHumanViewLoopStatus();
-                        return payload;
-                    },
-                    refreshLoopStatus: async () => await refreshHumanViewLoopStatus()
+                    }
                 },
 	                library: {
 	                    items: savedLibrary,

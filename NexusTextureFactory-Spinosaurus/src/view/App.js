@@ -32,7 +32,7 @@
                         {vm.ui.activeTab === 'operations' && <OperationsTab customOpsVM={vm.customOps} />}
                         {vm.ui.activeTab === 'editor' && <EditorTab customOpsVM={vm.customOps} />}
                         {vm.ui.activeTab === 'integrations' && <IntegrationsTab />}
-                        {vm.ui.activeTab === 'settings' && <SettingsTab uiVM={vm.ui} dVM={vm.dream} humanViewVM={vm.humanView} />}
+                        {vm.ui.activeTab === 'settings' && <SettingsTab uiVM={vm.ui} dVM={vm.dream} toolkitVM={vm.toolkit} />}
                     </div>
                 </div>
             );
