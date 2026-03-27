@@ -39,6 +39,51 @@
             const [previewSelectedLayerId, setPreviewSelectedLayerId] = useState('layer-1');
             const [previewExpandedModules, setPreviewExpandedModules] = useState({});
             const [previewAdvancedPanels, setPreviewAdvancedPanels] = useState({});
+            const [previewVideoExportState, setPreviewVideoExportState] = useState({
+                exporting: false,
+                status: 'idle',
+                jobId: '',
+                currentFrame: 0,
+                totalFrames: 0,
+                progress: 0,
+                outputPath: '',
+                error: '',
+                message: ''
+            });
+            const [previewCanvasHost, setPreviewCanvasHost] = useState(null);
+            const [captureActiveSetId, setCaptureActiveSetId] = useState('');
+            const [captureConfig, setCaptureConfig] = useState(createDefaultCaptureLineupConfig());
+            const [captureRuntimeStatus, setCaptureRuntimeStatus] = useState(isPreviewWebGL2Supported() ? 'idle' : 'unsupported');
+            const [captureFocusState, setCaptureFocusState] = useState({
+                index: -1,
+                stackId: '',
+                stackName: '',
+                stackX: 0,
+                cameraX: 0,
+                segmentProgress: 0,
+                secondsPerStack: 2
+            });
+            const [captureVideoExportState, setCaptureVideoExportState] = useState({
+                exporting: false,
+                status: 'idle',
+                jobId: '',
+                currentFrame: 0,
+                totalFrames: 0,
+                progress: 0,
+                outputPath: '',
+                error: '',
+                message: ''
+            });
+            const [captureReviewState, setCaptureReviewState] = useState({
+                status: 'idle',
+                outputPath: '',
+                frameDir: '',
+                summary: '',
+                issues: [],
+                frames: [],
+                error: ''
+            });
+            const [captureCanvasHost, setCaptureCanvasHost] = useState(null);
             const [toolkitBaseUrl, setToolkitBaseUrl] = useState(TOOLKIT_DEFAULT_URL);
             const [toolkitHealth, setToolkitHealth] = useState({ status: 'idle', server_ready: false, toolkit_ready: false, last_error: '' });
             const [toolkitCatalog, setToolkitCatalog] = useState([]);
@@ -51,23 +96,66 @@
 	            const savedLibraryRef = useRef(savedLibrary);
 	            const dreamResultsRef = useRef(dreamState.results);
 	            const deleteHistoryRef = useRef(deleteHistory);
-	            const persistTimerRef = useRef(null);
+            const persistTimerRef = useRef(null);
             const hydratedLibraryUrlsRef = useRef(new Map());
             const dreamRunIdRef = useRef(0);
             const dreamStopRequestedRef = useRef(false);
+            const activeTabRef = useRef(activeTab);
             const previewRuntimeRef = useRef(null);
-            const previewCanvasRef = useRef(null);
             const previewAnimationFrameRef = useRef(null);
             const previewSourceLoadIdRef = useRef(0);
+            const previewVideoCancelRef = useRef(false);
+            const captureRuntimeRef = useRef(null);
+            const captureAnimationFrameRef = useRef(null);
+            const captureSceneLoadIdRef = useRef(0);
+            const captureVideoCancelRef = useRef(false);
             const toolkitBridgeRef = useRef(new ToolkitToolBridge(TOOLKIT_DEFAULT_URL));
+            const CAPTURE_STORAGE_KEY_UI = 'spinosaurus-capture-ui-v1';
             const getPreviewLayerUiKey = useCallback((presetId, layerId) => `${String(presetId || 'preset')}::${String(layerId || 'layer')}`, []);
             const clampSetGridColumns = (value) => {
                 const parsed = Number.parseInt(value, 10);
                 if (!Number.isFinite(parsed)) return DEFAULT_SET_GRID_COLUMNS;
                 return Math.max(1, Math.min(12, parsed));
             };
+            const disposeTextureEngine = (engine) => {
+                if (engine?.dispose) engine.dispose();
+            };
+            const disposeTextureEngineList = (list) => {
+                (Array.isArray(list) ? list : []).forEach((engine) => disposeTextureEngine(engine));
+            };
+            const syncCaptureFocusState = useCallback((runtime) => {
+                const next = runtime?.getCaptureLineupFocus?.() || {
+                    index: -1,
+                    stackId: '',
+                    stackName: '',
+                    stackX: 0,
+                    cameraX: 0,
+                    segmentProgress: 0,
+                    secondsPerStack: 2
+                };
+                setCaptureFocusState((prev) => (
+                    prev.index === next.index &&
+                    prev.stackId === next.stackId &&
+                    prev.stackName === next.stackName &&
+                    prev.secondsPerStack === next.secondsPerStack
+                ) ? prev : next);
+            }, []);
 
-	            useEffect(() => { eR.current = new TextureEngine(256, 256); bER.current = new TextureEngine(256, 256); }, []);
+	            useEffect(() => {
+                    eR.current = new TextureEngine(256, 256);
+                    bER.current = new TextureEngine(256, 256);
+                    return () => {
+                        disposeTextureEngine(eR.current);
+                        disposeTextureEngine(bER.current);
+                        disposeTextureEngineList(generationEnginesRef.current);
+                        eR.current = null;
+                        bER.current = null;
+                        generationEnginesRef.current = [];
+                    };
+                }, []);
+            useEffect(() => {
+                activeTabRef.current = activeTab;
+            }, [activeTab]);
 	            useEffect(() => {
                 if (!eR.current) return;
                 try {
@@ -290,6 +378,16 @@
                             if (parsed.advancedPanels && typeof parsed.advancedPanels === 'object') setPreviewAdvancedPanels(parsed.advancedPanels);
                         }
                     }
+                    const rawCaptureUi = localStorage.getItem(CAPTURE_STORAGE_KEY_UI);
+                    if (rawCaptureUi) {
+                        const parsed = JSON.parse(rawCaptureUi);
+                        if (parsed && typeof parsed === 'object') {
+                            if (typeof parsed.activeSetId === 'string') setCaptureActiveSetId(parsed.activeSetId);
+                            if (parsed.captureConfig && typeof parsed.captureConfig === 'object') {
+                                setCaptureConfig(normalizeCaptureLineupConfig(parsed.captureConfig));
+                            }
+                        }
+                    }
                     const rawToolkitUi = localStorage.getItem(TOOLKIT_UI_STORAGE_KEY);
                     if (rawToolkitUi) {
                         const parsed = JSON.parse(rawToolkitUi);
@@ -395,6 +493,10 @@
                             expandedModules: previewExpandedModules,
                             advancedPanels: previewAdvancedPanels
                         }));
+                        localStorage.setItem(CAPTURE_STORAGE_KEY_UI, JSON.stringify({
+                            activeSetId: captureActiveSetId,
+                            captureConfig
+                        }));
                         localStorage.setItem(TOOLKIT_UI_STORAGE_KEY, JSON.stringify({
                             baseUrl: toolkitBaseUrl
                         }));
@@ -406,7 +508,7 @@
 	                        persistTimerRef.current = null;
 	                    }
 	                };
-            }, [savedLibrary, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, useWorkbenchSeed, maskViewMode, gridColumns, packConfig, flipbookConfig, previewPresets, previewActiveSourceId, previewActivePresetId, previewSelectedLayerId, previewIsPlaying, previewTimeScale, previewExpandedModules, previewAdvancedPanels, toolkitBaseUrl]);
+            }, [savedLibrary, customOperations, filterModules, qualityFilters, dreamParams, autoAnimateFrames, useWorkbenchSeed, maskViewMode, gridColumns, packConfig, flipbookConfig, previewPresets, previewActiveSourceId, previewActivePresetId, previewSelectedLayerId, previewIsPlaying, previewTimeScale, previewExpandedModules, previewAdvancedPanels, captureActiveSetId, captureConfig, toolkitBaseUrl]);
 
             const previewSupported = useMemo(() => isPreviewWebGL2Supported(), []);
             const activePreviewSourceItem = useMemo(() => savedLibrary.find((it) => it.id === previewActiveSourceId) || null, [savedLibrary, previewActiveSourceId]);
@@ -462,6 +564,31 @@
                 });
             }, []);
 
+            const loadCaptureSetImages = useCallback(async (items) => {
+                const entries = [];
+                const revokeUrls = [];
+                for (const item of (Array.isArray(items) ? items : [])) {
+                    try {
+                        const result = await loadPreviewSourceImage(item);
+                        entries.push({
+                            id: item.id,
+                            name: item.name,
+                            item,
+                            image: result?.image || null
+                        });
+                        if (result?.revokeUrl) revokeUrls.push(result.revokeUrl);
+                    } catch (_) {
+                        entries.push({
+                            id: item.id,
+                            name: item.name,
+                            item,
+                            image: null
+                        });
+                    }
+                }
+                return { entries, revokeUrls };
+            }, [loadPreviewSourceImage]);
+
             useEffect(() => {
                 if (activeTab !== 'preview') {
                     if (previewAnimationFrameRef.current) {
@@ -472,19 +599,20 @@
                         previewRuntimeRef.current.dispose();
                         previewRuntimeRef.current = null;
                     }
+                    if (previewSupported) setPreviewRuntimeStatus('idle');
                     return;
                 }
                 if (!previewSupported) {
                     setPreviewRuntimeStatus('unsupported');
                     return;
                 }
-                if (!previewCanvasRef.current) return;
+                if (!previewCanvasHost) return;
                 if (!previewRuntimeRef.current) {
                     try {
-                        const runtime = new PreviewParticleRuntime({ canvas: previewCanvasRef.current });
+                        setPreviewRuntimeStatus('mounting');
+                        const runtime = new PreviewParticleRuntime({ canvas: previewCanvasHost });
                         runtime.mount();
                         previewRuntimeRef.current = runtime;
-                        setPreviewRuntimeStatus('ready');
                     } catch (error) {
                         console.error(error);
                         setPreviewRuntimeStatus('error');
@@ -492,7 +620,7 @@
                     }
                 }
                 const runtime = previewRuntimeRef.current;
-                const host = previewCanvasRef.current;
+                const host = previewCanvasHost;
                 const updateSize = () => {
                     if (!host || !runtime) return;
                     runtime.resize(host.clientWidth || host.width || 1, host.clientHeight || host.height || 1);
@@ -525,10 +653,10 @@
                         previewRuntimeRef.current = null;
                     }
                 };
-            }, [activeTab, previewSupported]);
+            }, [activeTab, previewSupported, previewCanvasHost]);
 
             useEffect(() => {
-                if (!previewRuntimeRef.current || !activePreviewPreset || activeTab !== 'preview') return;
+                if (!previewCanvasHost || !previewRuntimeRef.current || !activePreviewPreset || activeTab !== 'preview') return;
                 const validation = validatePreviewPreset(activePreviewPreset);
                 if (!validation.valid) {
                     setPreviewRuntimeStatus('invalid_preset');
@@ -542,20 +670,20 @@
                     console.error(error);
                     setPreviewRuntimeStatus('error');
                 }
-            }, [activePreviewPreset, activeTab, activePreviewSourceItem]);
+            }, [activePreviewPreset, activeTab, activePreviewSourceItem, previewCanvasHost]);
 
             useEffect(() => {
-                if (!previewRuntimeRef.current || activeTab !== 'preview') return;
+                if (!previewCanvasHost || !previewRuntimeRef.current || activeTab !== 'preview') return;
                 previewRuntimeRef.current.setPlaying(previewIsPlaying);
-            }, [previewIsPlaying, activeTab]);
+            }, [previewIsPlaying, activeTab, previewCanvasHost]);
 
             useEffect(() => {
-                if (!previewRuntimeRef.current || activeTab !== 'preview') return;
+                if (!previewCanvasHost || !previewRuntimeRef.current || activeTab !== 'preview') return;
                 previewRuntimeRef.current.setTimeScale(previewTimeScale);
-            }, [previewTimeScale, activeTab]);
+            }, [previewTimeScale, activeTab, previewCanvasHost]);
 
             useEffect(() => {
-                if (!previewRuntimeRef.current || activeTab !== 'preview') return;
+                if (!previewCanvasHost || !previewRuntimeRef.current || activeTab !== 'preview') return;
                 if (!activePreviewSourceItem) {
                     previewRuntimeRef.current.setSourceImage(null);
                     setPreviewRuntimeStatus(activePreviewPreset ? 'running_fallback_sprite' : 'idle');
@@ -563,7 +691,7 @@
                 }
                 const loadId = ++previewSourceLoadIdRef.current;
                 let cancelled = false;
-                setPreviewRuntimeStatus('ready');
+                setPreviewRuntimeStatus('mounting');
                 loadPreviewSourceImage(activePreviewSourceItem).then((result) => {
                     if (cancelled || loadId !== previewSourceLoadIdRef.current || !previewRuntimeRef.current) {
                         if (result?.revokeUrl) URL.revokeObjectURL(result.revokeUrl);
@@ -579,7 +707,7 @@
                 return () => {
                     cancelled = true;
                 };
-            }, [activePreviewSourceItem, activeTab, activePreviewPreset, loadPreviewSourceImage]);
+            }, [activePreviewSourceItem, activeTab, activePreviewPreset, loadPreviewSourceImage, previewCanvasHost]);
 
             const sets = useMemo(() => {
                 const normalizeName = (item) => String(item?.name || 'Misc');
@@ -636,6 +764,160 @@
                 });
                 return final;
             }, [savedLibrary, packConfig]);
+            const activeCaptureSet = useMemo(() => sets.find((set) => set.id === captureActiveSetId) || sets[0] || null, [sets, captureActiveSetId]);
+            const activeCaptureConfig = useMemo(() => {
+                const normalized = normalizeCaptureLineupConfig(captureConfig, activeCaptureSet?.name || 'Texture Set', activePreviewPreset?.name || 'Turbulence Demo');
+                const itemCount = activeCaptureSet?.items?.length || 0;
+                const autoDuration = resolveCaptureLineupDurationSeconds(normalized, itemCount || 1);
+                const lineupTravel = Math.max(normalized.travelDistance, Math.max(1, itemCount) * normalized.stackSpacing);
+                return {
+                    ...normalized,
+                    durationSeconds: autoDuration,
+                    travelDistance: lineupTravel,
+                    stageScrollTravel: Math.max(normalized.stageScrollTravel, lineupTravel)
+                };
+            }, [captureConfig, activeCaptureSet?.items?.length, activeCaptureSet?.name, activePreviewPreset?.name]);
+
+            useEffect(() => {
+                if (!sets.length) {
+                    if (captureActiveSetId) setCaptureActiveSetId('');
+                    return;
+                }
+                if (!sets.some((set) => set.id === captureActiveSetId)) {
+                    setCaptureActiveSetId(sets[0].id);
+                }
+            }, [sets, captureActiveSetId]);
+
+            useEffect(() => {
+                if (activeTab !== 'capture') {
+                    if (captureAnimationFrameRef.current) {
+                        cancelAnimationFrame(captureAnimationFrameRef.current);
+                        captureAnimationFrameRef.current = null;
+                    }
+                    if (captureRuntimeRef.current) {
+                        captureRuntimeRef.current.dispose();
+                        captureRuntimeRef.current = null;
+                    }
+                    setCaptureFocusState({
+                        index: -1,
+                        stackId: '',
+                        stackName: '',
+                        stackX: 0,
+                        cameraX: 0,
+                        segmentProgress: 0,
+                        secondsPerStack: activeCaptureConfig?.secondsPerStack || 2
+                    });
+                    if (previewSupported) setCaptureRuntimeStatus('idle');
+                    return;
+                }
+                if (!previewSupported) {
+                    setCaptureRuntimeStatus('unsupported');
+                    return;
+                }
+                if (!captureCanvasHost) return;
+                if (!captureRuntimeRef.current) {
+                    try {
+                        setCaptureRuntimeStatus('mounting');
+                        const runtime = new PreviewParticleRuntime({ canvas: captureCanvasHost });
+                        runtime.mount();
+                        captureRuntimeRef.current = runtime;
+                    } catch (error) {
+                        console.error(error);
+                        setCaptureRuntimeStatus('error');
+                        return;
+                    }
+                }
+                const runtime = captureRuntimeRef.current;
+                const host = captureCanvasHost;
+                const updateSize = () => {
+                    if (!host || !runtime) return;
+                    runtime.resize(host.clientWidth || host.width || 1, host.clientHeight || host.height || 1);
+                };
+                updateSize();
+                let running = true;
+                const frame = (now) => {
+                    if (!running || !captureRuntimeRef.current) return;
+                    try {
+                        captureRuntimeRef.current.tick(now);
+                        syncCaptureFocusState(captureRuntimeRef.current);
+                    } catch (error) {
+                        console.error(error);
+                        setCaptureRuntimeStatus('error');
+                        running = false;
+                        return;
+                    }
+                    captureAnimationFrameRef.current = requestAnimationFrame(frame);
+                };
+                captureAnimationFrameRef.current = requestAnimationFrame(frame);
+                window.addEventListener('resize', updateSize);
+                return () => {
+                    running = false;
+                    window.removeEventListener('resize', updateSize);
+                    if (captureAnimationFrameRef.current) {
+                        cancelAnimationFrame(captureAnimationFrameRef.current);
+                        captureAnimationFrameRef.current = null;
+                    }
+                    if (captureRuntimeRef.current) {
+                        captureRuntimeRef.current.dispose();
+                        captureRuntimeRef.current = null;
+                    }
+                };
+            }, [activeTab, previewSupported, captureCanvasHost]);
+
+            useEffect(() => {
+                if (!captureCanvasHost || !captureRuntimeRef.current || activeTab !== 'capture' || !activePreviewPreset) return;
+                if (!activeCaptureSet || !activeCaptureSet.items?.length) {
+                    captureRuntimeRef.current.setCaptureLineupScene(activePreviewPreset, [], {
+                        ...activeCaptureConfig,
+                        setId: activeCaptureSet?.id || '',
+                        setName: activeCaptureSet?.name || 'Texture Set'
+                    });
+                    syncCaptureFocusState(captureRuntimeRef.current);
+                    setCaptureRuntimeStatus('empty_set');
+                    return;
+                }
+                const loadId = ++captureSceneLoadIdRef.current;
+                let cancelled = false;
+                setCaptureRuntimeStatus('loading_set');
+                loadCaptureSetImages(activeCaptureSet.items || []).then(({ entries, revokeUrls }) => {
+                    if (cancelled || loadId !== captureSceneLoadIdRef.current || !captureRuntimeRef.current) {
+                        revokeUrls.forEach((url) => URL.revokeObjectURL(url));
+                        return;
+                    }
+                    captureRuntimeRef.current.setCaptureLineupScene(activePreviewPreset, entries, {
+                        ...activeCaptureConfig,
+                        setId: activeCaptureSet.id,
+                        setName: activeCaptureSet.name
+                    });
+                    syncCaptureFocusState(captureRuntimeRef.current);
+                    if (!entries.length) setCaptureRuntimeStatus('empty_set');
+                    else setCaptureRuntimeStatus(entries.some((entry) => entry.image) ? 'running' : 'running_fallback_sprite');
+                    revokeUrls.forEach((url) => URL.revokeObjectURL(url));
+                }).catch((error) => {
+                    console.error(error);
+                    if (!cancelled) setCaptureRuntimeStatus('error');
+                });
+                return () => {
+                    cancelled = true;
+                };
+            }, [activeTab, activePreviewPreset, activeCaptureSet, activeCaptureConfig, loadCaptureSetImages, syncCaptureFocusState, captureCanvasHost]);
+
+            useEffect(() => {
+                if (!captureCanvasHost || !captureRuntimeRef.current || activeTab !== 'capture') return;
+                captureRuntimeRef.current.setPlaying(previewIsPlaying);
+            }, [previewIsPlaying, activeTab, captureCanvasHost]);
+
+            useEffect(() => {
+                if (!captureCanvasHost || !captureRuntimeRef.current || activeTab !== 'capture') return;
+                captureRuntimeRef.current.setTimeScale(previewTimeScale);
+            }, [previewTimeScale, activeTab, captureCanvasHost]);
+
+            useEffect(() => {
+                if (activeTab !== 'preview' && activeTab !== 'generator') {
+                    disposeTextureEngineList(generationEnginesRef.current);
+                    generationEnginesRef.current = [];
+                }
+            }, [activeTab]);
 
             const reorganizePacks = () => {
                 setSavedLibrary(prev => {
@@ -1399,15 +1681,19 @@
 	                        const resFolder = zip.folder(`${exportStem}_${r}`);
 	                        const rendered = new Array(targetSet.items.length);
 	                        const engines = Array.from({ length: Math.min(packWorkers, targetSet.items.length) }, () => new TextureEngine(r, r));
-	                        await VMUtils.runWorkerPool(targetSet.items.length, engines.length || 1, async (idx, slot) => {
-	                            const engine = engines[slot] || engines[0];
-	                            const item = targetSet.items[idx];
-	                            engine.renderStack(item.config);
-	                            rendered[idx] = {};
+	                        try {
+	                            await VMUtils.runWorkerPool(targetSet.items.length, engines.length || 1, async (idx, slot) => {
+	                                const engine = engines[slot] || engines[0];
+	                                const item = targetSet.items[idx];
+	                                engine.renderStack(item.config);
+	                                rendered[idx] = {};
                                 for (const mode of OUTPUT_EXPORT_MODES) {
-	                                rendered[idx][mode] = await engine.getTextureBlob(item.config.length - 1, 'image/png', undefined, { mode });
+	                                    rendered[idx][mode] = await engine.getTextureBlob(item.config.length - 1, 'image/png', undefined, { mode });
                                 }
-	                        });
+	                            });
+	                        } finally {
+	                            disposeTextureEngineList(engines);
+	                        }
 	                        for (let idx = 0; idx < targetSet.items.length; idx++) {
 	                            const fileName = `${exportStem}_${(idx + 1).toString().padStart(2, '0')}_x${r}`;
                                 for (const mode of OUTPUT_EXPORT_MODES) {
@@ -1421,8 +1707,9 @@
 	                        const indexPadded = (itIdx + 1).toString().padStart(2, '0');
 	                        const baseFileName = `${exportStem}_${indexPadded}`;
 	                        const fE = new TextureEngine(1024, 1024);
-	                        const base = JSON.parse(JSON.stringify(item.config));
-	                        for (const mult of [4, 8, 16]) {
+	                        try {
+	                            const base = JSON.parse(JSON.stringify(item.config));
+	                            for (const mult of [4, 8, 16]) {
 	                            setExportPhase(`Packing ${baseFileName} x${mult}...`);
                                 const flipbookFileName = `${exportStem}_${indexPadded}_x${mult}_Flipbook`;
 	                            const sC = document.createElement('canvas');
@@ -1456,6 +1743,9 @@
 	                            });
                                     flipbooksRoot.file(buildOutputFileName(flipbookFileName, mode), spriteSheetBlob);
                                 }
+	                            }
+	                        } finally {
+	                            disposeTextureEngine(fE);
 	                        }
 	                    }
 	                    setExportPhase('Finalizing ZIP...');
@@ -1607,6 +1897,396 @@
                 setToolkitLastRun(payload);
                 return payload;
             }, [withToolkit]);
+
+            const updateActivePreviewCapture = (updater) => {
+                updateActivePreviewPreset((preset) => {
+                    const nextCapture = typeof updater === 'function'
+                        ? updater({ ...(preset.scene?.capture || createDefaultPreviewPreset().scene.capture) })
+                        : updater;
+                    return {
+                        ...preset,
+                        scene: {
+                            ...preset.scene,
+                            capture: normalizePreviewCaptureConfig(nextCapture, preset.name)
+                        }
+                    };
+                });
+            };
+
+            const pollPreviewVideoStatus = useCallback(async (jobId) => {
+                if (!jobId) return null;
+                while (!previewVideoCancelRef.current) {
+                    const payload = await withToolkit((bridge) => bridge.previewVideoStatus(jobId));
+                    const job = payload?.job || null;
+                    if (job) {
+                        setPreviewVideoExportState((prev) => ({
+                            ...prev,
+                            status: payload.status || job.status || prev.status,
+                            outputPath: job.outputPath || prev.outputPath,
+                            progress: job.expectedFrames > 0 ? Math.min(1, (job.encodedFrames || job.receivedFrames || 0) / job.expectedFrames) : prev.progress,
+                            message: payload.status === 'encoding'
+                                ? `Encoding ${job.outputName || 'video'}...`
+                                : (job.status === 'completed' ? `Saved ${job.outputName || 'video'}` : prev.message),
+                            error: job.error || prev.error
+                        }));
+                    }
+                    if (!payload || ['completed', 'error', 'canceled'].includes(payload.status)) {
+                        return payload;
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 700));
+                }
+                return null;
+            }, [withToolkit]);
+
+            const startPreviewVideoExport = useCallback(async () => {
+                if (!previewRuntimeRef.current || activeTab !== 'preview' || !activePreviewPreset) {
+                    throw new Error('Preview runtime is not ready.');
+                }
+                const validation = validatePreviewPreset(activePreviewPreset);
+                if (!validation.valid) {
+                    setPreviewJsonError(validation.errors.join('\n'));
+                    throw new Error(validation.errors[0] || 'Preview preset is invalid.');
+                }
+                const health = await refreshToolkitHealth();
+                if (health?.status !== 'ok' || health?.ffmpeg_available !== true) {
+                    throw new Error(health?.ffmpeg_error || health?.last_error || 'Toolkit or ffmpeg is not ready.');
+                }
+                const captureConfig = normalizePreviewCaptureConfig(validation.sanitizedPreset.scene.capture, validation.sanitizedPreset.name);
+                const expectedFrames = Math.max(1, Math.round(captureConfig.durationSeconds * captureConfig.fps));
+                previewVideoCancelRef.current = false;
+                setPreviewVideoExportState({
+                    exporting: true,
+                    status: 'preparing',
+                    jobId: '',
+                    currentFrame: 0,
+                    totalFrames: expectedFrames,
+                    progress: 0,
+                    outputPath: '',
+                    error: '',
+                    message: 'Preparing deterministic render...'
+                });
+                let session = null;
+                let jobId = '';
+                try {
+                    const startPayload = await withToolkit((bridge) => bridge.previewVideoStart({
+                        outputName: captureConfig.outputName,
+                        durationSeconds: captureConfig.durationSeconds,
+                        fps: captureConfig.fps,
+                        width: captureConfig.width,
+                        height: captureConfig.height,
+                        expectedFrames
+                    }));
+                    jobId = startPayload?.job?.jobId || '';
+                    if (!jobId) throw new Error('Toolkit did not return a preview video job id.');
+                    session = previewRuntimeRef.current.beginDeterministicCapture(captureConfig);
+                    setPreviewVideoExportState((prev) => ({
+                        ...prev,
+                        jobId,
+                        status: 'rendering_frames',
+                        message: 'Rendering frames...'
+                    }));
+                    for (let frameIndex = 0; frameIndex < session.totalFrames; frameIndex++) {
+                        if (previewVideoCancelRef.current) throw new Error('Preview video export canceled.');
+                        if (activeTabRef.current !== 'preview' || !previewRuntimeRef.current) {
+                            throw new Error('Preview video export stopped because PREVIEW is no longer the active tab.');
+                        }
+                        const frame = await previewRuntimeRef.current.captureDeterministicFrame(session, frameIndex);
+                        await withToolkit((bridge) => bridge.previewVideoFrame(jobId, frameIndex, frame.blob));
+                        setPreviewVideoExportState((prev) => ({
+                            ...prev,
+                            currentFrame: frameIndex + 1,
+                            progress: (frameIndex + 1) / session.totalFrames,
+                            message: `Uploading frame ${frameIndex + 1}/${session.totalFrames}...`
+                        }));
+                        if ((frameIndex + 1) % 6 === 0) {
+                            await new Promise((resolve) => setTimeout(resolve, 0));
+                        }
+                    }
+                    await withToolkit((bridge) => bridge.previewVideoFinalize(jobId));
+                    setPreviewVideoExportState((prev) => ({
+                        ...prev,
+                        status: 'encoding',
+                        message: 'Encoding MP4 with ffmpeg...'
+                    }));
+                    const finalPayload = await pollPreviewVideoStatus(jobId);
+                    const finalJob = finalPayload?.job || null;
+                    setPreviewVideoExportState((prev) => ({
+                        ...prev,
+                        exporting: false,
+                        status: finalPayload?.status || 'completed',
+                        outputPath: finalJob?.outputPath || prev.outputPath,
+                        progress: finalPayload?.status === 'completed' ? 1 : prev.progress,
+                        error: finalJob?.error || '',
+                        message: finalPayload?.status === 'completed'
+                            ? `Saved MP4 to ${finalJob?.outputPath || prev.outputPath}`
+                            : (finalJob?.error || prev.message)
+                    }));
+                } catch (error) {
+                    if (jobId) {
+                        try {
+                            await withToolkit((bridge) => bridge.previewVideoCancel(jobId));
+                        } catch (_) {}
+                    }
+                    setPreviewVideoExportState((prev) => ({
+                        ...prev,
+                        exporting: false,
+                        status: previewVideoCancelRef.current ? 'canceled' : 'error',
+                        error: error?.message || 'Preview video export failed.',
+                        message: previewVideoCancelRef.current ? 'Preview video export canceled.' : 'Preview video export failed.'
+                    }));
+                    throw error;
+                } finally {
+                    if (session && previewRuntimeRef.current) {
+                        await previewRuntimeRef.current.finishDeterministicCapture(session, { restore: true });
+                    }
+                }
+            }, [activePreviewPreset, activeTab, pollPreviewVideoStatus, refreshToolkitHealth, withToolkit]);
+
+            const cancelPreviewVideoExport = useCallback(async () => {
+                previewVideoCancelRef.current = true;
+                if (previewVideoExportState.jobId) {
+                    try {
+                        await withToolkit((bridge) => bridge.previewVideoCancel(previewVideoExportState.jobId));
+                    } catch (_) {}
+                }
+                setPreviewVideoExportState((prev) => ({
+                    ...prev,
+                    exporting: false,
+                    status: 'canceled',
+                    message: 'Preview video export canceled.'
+                }));
+            }, [previewVideoExportState.jobId, withToolkit]);
+
+            const pollCaptureVideoStatus = useCallback(async (jobId) => {
+                if (!jobId) return null;
+                while (!captureVideoCancelRef.current) {
+                    const payload = await withToolkit((bridge) => bridge.captureVideoStatus(jobId));
+                    const job = payload?.job || null;
+                    if (job) {
+                        setCaptureVideoExportState((prev) => ({
+                            ...prev,
+                            status: payload.status || job.status || prev.status,
+                            outputPath: job.outputPath || prev.outputPath,
+                            progress: job.expectedFrames > 0 ? Math.min(1, (job.encodedFrames || job.receivedFrames || 0) / job.expectedFrames) : prev.progress,
+                            message: payload.status === 'encoding'
+                                ? `Encoding ${job.outputName || 'video'}...`
+                                : (job.status === 'completed' ? `Saved ${job.outputName || 'video'}` : prev.message),
+                            error: job.error || prev.error
+                        }));
+                    }
+                    if (!payload || ['completed', 'error', 'canceled'].includes(payload.status)) {
+                        return payload;
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 700));
+                }
+                return null;
+            }, [withToolkit]);
+
+            const reviewSavedCaptureVideo = useCallback(async (outputPath, metadata = {}) => {
+                if (!outputPath) {
+                    setCaptureReviewState({
+                        status: 'error',
+                        outputPath: '',
+                        frameDir: '',
+                        summary: '',
+                        issues: [],
+                        frames: [],
+                        error: 'Capture review requires an output path.'
+                    });
+                    return null;
+                }
+                setCaptureReviewState((prev) => ({
+                    ...prev,
+                    status: 'reviewing',
+                    outputPath,
+                    error: '',
+                    summary: ''
+                }));
+                try {
+                    const payload = await withToolkit((bridge) => bridge.captureVideoReview({
+                        outputPath,
+                        frameCount: 5,
+                        metadata
+                    }));
+                    setCaptureReviewState({
+                        status: payload?.status || 'completed',
+                        outputPath: payload?.outputPath || outputPath,
+                        frameDir: payload?.frameDir || '',
+                        summary: payload?.reviewSummary || '',
+                        issues: Array.isArray(payload?.issues) ? payload.issues : [],
+                        frames: Array.isArray(payload?.reviewFrames) ? payload.reviewFrames : [],
+                        error: ''
+                    });
+                    return payload;
+                } catch (error) {
+                    setCaptureReviewState({
+                        status: 'error',
+                        outputPath,
+                        frameDir: '',
+                        summary: '',
+                        issues: [],
+                        frames: [],
+                        error: error?.message || 'Capture review failed.'
+                    });
+                    throw error;
+                }
+            }, [withToolkit]);
+
+            const startCaptureVideoExport = useCallback(async () => {
+                if (!captureRuntimeRef.current || activeTab !== 'capture' || !activePreviewPreset || !activeCaptureSet) {
+                    throw new Error('Capture runtime is not ready.');
+                }
+                const validation = validatePreviewPreset(activePreviewPreset);
+                if (!validation.valid) {
+                    setPreviewJsonError(validation.errors.join('\n'));
+                    throw new Error(validation.errors[0] || 'Preview preset is invalid.');
+                }
+                const health = await refreshToolkitHealth();
+                if (health?.status !== 'ok' || health?.ffmpeg_available !== true) {
+                    throw new Error(health?.ffmpeg_error || health?.last_error || 'Toolkit or ffmpeg is not ready.');
+                }
+                const normalizedConfig = normalizeCaptureLineupConfig(activeCaptureConfig, activeCaptureSet.name, validation.sanitizedPreset.name);
+                const expectedFrames = Math.max(1, Math.round(normalizedConfig.durationSeconds * normalizedConfig.fps));
+                const metadata = {
+                    setId: activeCaptureSet.id,
+                    setName: activeCaptureSet.name,
+                    presetName: validation.sanitizedPreset.name,
+                    itemCount: activeCaptureSet.items?.length || 0
+                };
+                captureVideoCancelRef.current = false;
+                setCaptureReviewState((prev) => ({
+                    ...prev,
+                    status: 'idle',
+                    outputPath: '',
+                    frameDir: '',
+                    summary: '',
+                    issues: [],
+                    frames: [],
+                    error: ''
+                }));
+                setCaptureVideoExportState({
+                    exporting: true,
+                    status: 'preparing',
+                    jobId: '',
+                    currentFrame: 0,
+                    totalFrames: expectedFrames,
+                    progress: 0,
+                    outputPath: '',
+                    error: '',
+                    message: 'Preparing lineup render...'
+                });
+                let session = null;
+                let jobId = '';
+                try {
+                    const startPayload = await withToolkit((bridge) => bridge.captureVideoStart({
+                        outputName: normalizedConfig.outputName,
+                        durationSeconds: normalizedConfig.durationSeconds,
+                        fps: normalizedConfig.fps,
+                        width: normalizedConfig.width,
+                        height: normalizedConfig.height,
+                        expectedFrames,
+                        metadata
+                    }));
+                    jobId = startPayload?.job?.jobId || '';
+                    if (!jobId) throw new Error('Toolkit did not return a capture video job id.');
+                    session = captureRuntimeRef.current.beginDeterministicCapture({
+                        ...normalizedConfig,
+                        setId: activeCaptureSet.id,
+                        setName: activeCaptureSet.name
+                    });
+                    setCaptureVideoExportState((prev) => ({
+                        ...prev,
+                        jobId,
+                        status: 'rendering_frames',
+                        message: 'Rendering lineup frames...'
+                    }));
+                    for (let frameIndex = 0; frameIndex < session.totalFrames; frameIndex++) {
+                        if (captureVideoCancelRef.current) throw new Error('Capture video export canceled.');
+                        if (activeTabRef.current !== 'capture' || !captureRuntimeRef.current) {
+                            throw new Error('Capture video export stopped because CAPTURE is no longer the active tab.');
+                        }
+                        const frame = await captureRuntimeRef.current.captureDeterministicFrame(session, frameIndex);
+                        await withToolkit((bridge) => bridge.captureVideoFrame(jobId, frameIndex, frame.blob));
+                        setCaptureVideoExportState((prev) => ({
+                            ...prev,
+                            currentFrame: frameIndex + 1,
+                            progress: (frameIndex + 1) / session.totalFrames,
+                            message: `Uploading frame ${frameIndex + 1}/${session.totalFrames}...`
+                        }));
+                        if ((frameIndex + 1) % 6 === 0) {
+                            await new Promise((resolve) => setTimeout(resolve, 0));
+                        }
+                    }
+                    await withToolkit((bridge) => bridge.captureVideoFinalize(jobId));
+                    setCaptureVideoExportState((prev) => ({
+                        ...prev,
+                        status: 'encoding',
+                        message: 'Encoding MP4 with ffmpeg...'
+                    }));
+                    const finalPayload = await pollCaptureVideoStatus(jobId);
+                    const finalJob = finalPayload?.job || null;
+                    const finalOutputPath = finalJob?.outputPath || '';
+                    setCaptureVideoExportState((prev) => ({
+                        ...prev,
+                        exporting: false,
+                        status: finalPayload?.status || 'completed',
+                        outputPath: finalOutputPath || prev.outputPath,
+                        progress: finalPayload?.status === 'completed' ? 1 : prev.progress,
+                        error: finalJob?.error || '',
+                        message: finalPayload?.status === 'completed'
+                            ? `Saved MP4 to ${finalOutputPath || prev.outputPath}`
+                            : (finalJob?.error || prev.message)
+                    }));
+                    if (finalPayload?.status === 'completed' && finalOutputPath) {
+                        await reviewSavedCaptureVideo(finalOutputPath, metadata);
+                    }
+                } catch (error) {
+                    if (jobId) {
+                        try {
+                            await withToolkit((bridge) => bridge.captureVideoCancel(jobId));
+                        } catch (_) {}
+                    }
+                    setCaptureVideoExportState((prev) => ({
+                        ...prev,
+                        exporting: false,
+                        status: captureVideoCancelRef.current ? 'canceled' : 'error',
+                        error: error?.message || 'Capture video export failed.',
+                        message: captureVideoCancelRef.current ? 'Capture video export canceled.' : 'Capture video export failed.'
+                    }));
+                    throw error;
+                } finally {
+                    if (session && captureRuntimeRef.current) {
+                        await captureRuntimeRef.current.finishDeterministicCapture(session, { restore: true });
+                    }
+                }
+            }, [activeCaptureConfig, activeCaptureSet, activePreviewPreset, activeTab, pollCaptureVideoStatus, refreshToolkitHealth, reviewSavedCaptureVideo, withToolkit]);
+
+            const cancelCaptureVideoExport = useCallback(async () => {
+                captureVideoCancelRef.current = true;
+                if (captureVideoExportState.jobId) {
+                    try {
+                        await withToolkit((bridge) => bridge.captureVideoCancel(captureVideoExportState.jobId));
+                    } catch (_) {}
+                }
+                setCaptureVideoExportState((prev) => ({
+                    ...prev,
+                    exporting: false,
+                    status: 'canceled',
+                    message: 'Capture video export canceled.'
+                }));
+            }, [captureVideoExportState.jobId, withToolkit]);
+
+            useEffect(() => {
+                if (activeTab !== 'preview' && previewVideoExportState.exporting) {
+                    cancelPreviewVideoExport().catch(() => {});
+                }
+            }, [activeTab, previewVideoExportState.exporting, cancelPreviewVideoExport]);
+
+            useEffect(() => {
+                if (activeTab !== 'capture' && captureVideoExportState.exporting) {
+                    cancelCaptureVideoExport().catch(() => {});
+                }
+            }, [activeTab, captureVideoExportState.exporting, cancelCaptureVideoExport]);
 
             const updatePreviewLayerById = (layerId, updater) => {
                 updateActivePreviewPreset((preset) => ({
@@ -1772,10 +2452,14 @@
                         const z = new JSZip();
                         for (const r of selectedRes) {
                             const e = new TextureEngine(r, r);
-                            e.renderStack(steps);
-                            for (const mode of OUTPUT_EXPORT_MODES) {
-                                const blob = await e.getTextureBlob(steps.length - 1, 'image/png', undefined, { mode });
-                                z.file(buildOutputFileName(`${profileName}_${r}`, mode), blob);
+                            try {
+                                e.renderStack(steps);
+                                for (const mode of OUTPUT_EXPORT_MODES) {
+                                    const blob = await e.getTextureBlob(steps.length - 1, 'image/png', undefined, { mode });
+                                    z.file(buildOutputFileName(`${profileName}_${r}`, mode), blob);
+                                }
+                            } finally {
+                                disposeTextureEngine(e);
                             }
                         }
                         const c = await z.generateAsync({ type: "blob", compression: "STORE" });
@@ -1816,9 +2500,12 @@
                     advancedOpen: activePreviewAdvancedOpen,
                     isPlaying: previewIsPlaying,
                     timeScale: previewTimeScale,
+                    capture: activePreviewPreset?.scene?.capture || createDefaultPreviewPreset().scene.capture,
+                    exportState: previewVideoExportState,
+                    toolkitHealth,
                     jsonDraft: previewJsonDraft,
                     jsonError: previewJsonError,
-                    setCanvasHost: (node) => { previewCanvasRef.current = node; },
+                    setCanvasHost: (node) => setPreviewCanvasHost(node || null),
                     selectSource: (id) => setPreviewActiveSourceId(id || null),
                     selectPreset: (id) => {
                         const next = previewPresets.find((preset) => preset.id === id);
@@ -1887,6 +2574,8 @@
                     },
                     updateSceneField: (key, value) => updateActivePreviewPreset((preset) => ({ ...preset, scene: { ...preset.scene, [key]: value } })),
                     updateSceneFields: (patch) => updateActivePreviewPreset((preset) => ({ ...preset, scene: { ...preset.scene, ...(patch || {}) } })),
+                    updateCaptureField: (key, value) => updateActivePreviewCapture((capture) => ({ ...capture, [key]: value })),
+                    updateCaptureFields: (patch) => updateActivePreviewCapture((capture) => ({ ...capture, ...(patch || {}) })),
                     addLayer: () => updateActivePreviewPreset((preset) => {
                         const layer = createDefaultPreviewLayer(preset.layers.length);
                         layer.id = createPreviewLayerId(preset.layers.length);
@@ -1946,7 +2635,61 @@
                         if (previewRuntimeRef.current) previewRuntimeRef.current.resetSimulation();
                     },
                     setPlaying: (value) => setPreviewIsPlaying(!!value),
-                    setTimeScale: (value) => setPreviewTimeScale(clampPreviewValue(Number(value) || 0, 0, 3))
+                    setTimeScale: (value) => setPreviewTimeScale(clampPreviewValue(Number(value) || 0, 0, 3)),
+                    checkToolkitHealth: async () => await refreshToolkitHealth(),
+                    startVideoExport: async () => {
+                        try {
+                            await startPreviewVideoExport();
+                        } catch (error) {
+                            console.error(error);
+                        }
+                    },
+                    cancelVideoExport: async () => await cancelPreviewVideoExport()
+                },
+                capture: {
+                    supported: previewSupported,
+                    status: captureRuntimeStatus,
+                    activeSetId: activeCaptureSet?.id || '',
+                    activeSet: activeCaptureSet,
+                    sets,
+                    captureConfig: activeCaptureConfig,
+                    focusState: captureFocusState,
+                    exportState: captureVideoExportState,
+                    reviewState: captureReviewState,
+                    toolkitHealth,
+                    presetName: activePreviewPreset?.name || '',
+                    setCanvasHost: (node) => setCaptureCanvasHost(node || null),
+                    selectSet: (id) => setCaptureActiveSetId(id || ''),
+                    updateCaptureConfig: (patch) => setCaptureConfig((prev) => normalizeCaptureLineupConfig(typeof patch === 'function' ? patch(prev) : { ...prev, ...(patch || {}) }, activeCaptureSet?.name || 'Texture Set', activePreviewPreset?.name || 'Turbulence Demo')),
+                    updateCaptureField: (key, value) => setCaptureConfig((prev) => normalizeCaptureLineupConfig({ ...prev, [key]: value }, activeCaptureSet?.name || 'Texture Set', activePreviewPreset?.name || 'Turbulence Demo')),
+                    resetSimulation: () => {
+                        if (captureRuntimeRef.current) {
+                            captureRuntimeRef.current.resetSimulation();
+                            syncCaptureFocusState(captureRuntimeRef.current);
+                        }
+                    },
+                    checkToolkitHealth: async () => await refreshToolkitHealth(),
+                    startCaptureVideoExport: async () => {
+                        try {
+                            await startCaptureVideoExport();
+                        } catch (error) {
+                            console.error(error);
+                        }
+                    },
+                    cancelCaptureVideoExport: async () => await cancelCaptureVideoExport(),
+                    reviewSavedCaptureVideo: async () => {
+                        try {
+                            return await reviewSavedCaptureVideo(captureVideoExportState.outputPath || captureReviewState.outputPath, {
+                                setId: activeCaptureSet?.id || '',
+                                setName: activeCaptureSet?.name || '',
+                                presetName: activePreviewPreset?.name || '',
+                                itemCount: activeCaptureSet?.items?.length || 0
+                            });
+                        } catch (error) {
+                            console.error(error);
+                            return null;
+                        }
+                    }
                 },
                 toolkit: {
                     baseUrl: toolkitBaseUrl,
@@ -1971,7 +2714,7 @@
                         return payload;
                     }
                 },
-	                library: {
+                library: {
 	                    items: savedLibrary,
 	                    sets,
 	                    packConfig,
@@ -1981,6 +2724,24 @@
                     sendToFront,
                     sendToBack,
 	                    onSave: (it) => setSavedLibrary(p => [...p, { ...it, url: null }]),
+                    replaceItems: (items, options = {}) => {
+                        const nextLibrary = (Array.isArray(items) ? items : []).map((item, index) => ({
+                            ...item,
+                            id: String(item?.id || `validation-${index + 1}`),
+                            name: String(item?.name || `Validation_${String(index + 1).padStart(2, '0')}`),
+                            config: hydrateConfigDefaults(Array.isArray(item?.config) ? item.config : []),
+                            storageKey: item?.storageKey || null,
+                            url: typeof item?.url === 'string' ? item.url : null
+                        }));
+                        setSavedLibrary(nextLibrary);
+                        setDreamState((prev) => ({ ...prev, results: nextLibrary.map((item) => ({ ...item })) }));
+                        setPreviewActiveSourceId((currentId) => (
+                            nextLibrary.some((item) => item.id === currentId)
+                                ? currentId
+                                : (options.selectFirstSource === false ? null : (nextLibrary[0]?.id || null))
+                        ));
+                        setCaptureActiveSetId('');
+                    },
 	                    onLoad: (cfg) => { setSteps(hydrateConfigDefaults(cfg)); setActiveTab('builder'); },
                     openInPreview: (id) => {
                         if (!id) return;

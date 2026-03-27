@@ -13,8 +13,10 @@
             async request(path, options = {}) {
                 const response = await fetch(`${this.baseUrl}${path}`, {
                     method: options.method || 'GET',
-                    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-                    body: options.body ? JSON.stringify(options.body) : undefined
+                    headers: options.rawBody
+                        ? { ...(options.headers || {}) }
+                        : { 'Content-Type': 'application/json', ...(options.headers || {}) },
+                    body: options.rawBody ? options.rawBody : (options.body ? JSON.stringify(options.body) : undefined)
                 });
                 let payload = null;
                 try {
@@ -46,5 +48,57 @@
 
             logs() {
                 return this.request('/toolkit/logs');
+            }
+
+            previewVideoStart(config = {}) {
+                return this.request('/toolkit/preview/video/start', { method: 'POST', body: config });
+            }
+
+            previewVideoFrame(jobId, frameIndex, blob) {
+                return this.request(`/toolkit/preview/video/frame?jobId=${encodeURIComponent(jobId)}&frameIndex=${encodeURIComponent(frameIndex)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'image/jpeg' },
+                    rawBody: blob
+                });
+            }
+
+            previewVideoFinalize(jobId) {
+                return this.request('/toolkit/preview/video/finalize', { method: 'POST', body: { jobId } });
+            }
+
+            previewVideoStatus(jobId) {
+                return this.request(`/toolkit/preview/video/status/${encodeURIComponent(jobId)}`);
+            }
+
+            previewVideoCancel(jobId) {
+                return this.request('/toolkit/preview/video/cancel', { method: 'POST', body: { jobId } });
+            }
+
+            captureVideoStart(config = {}) {
+                return this.request('/toolkit/capture/video/start', { method: 'POST', body: config });
+            }
+
+            captureVideoFrame(jobId, frameIndex, blob) {
+                return this.request(`/toolkit/capture/video/frame?jobId=${encodeURIComponent(jobId)}&frameIndex=${encodeURIComponent(frameIndex)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'image/jpeg' },
+                    rawBody: blob
+                });
+            }
+
+            captureVideoFinalize(jobId) {
+                return this.request('/toolkit/capture/video/finalize', { method: 'POST', body: { jobId } });
+            }
+
+            captureVideoStatus(jobId) {
+                return this.request(`/toolkit/capture/video/status/${encodeURIComponent(jobId)}`);
+            }
+
+            captureVideoCancel(jobId) {
+                return this.request('/toolkit/capture/video/cancel', { method: 'POST', body: { jobId } });
+            }
+
+            captureVideoReview(payload = {}) {
+                return this.request('/toolkit/capture/video/review', { method: 'POST', body: payload });
             }
         }

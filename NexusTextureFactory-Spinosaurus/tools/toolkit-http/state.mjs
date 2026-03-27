@@ -4,6 +4,12 @@ export function createToolkitState() {
     lastError: '',
     lastRun: null,
     logs: [],
+    previewVideo: {
+      jobs: new Map()
+    },
+    captureVideo: {
+      jobs: new Map()
+    },
     session: {
       requested: false,
       status: 'idle'

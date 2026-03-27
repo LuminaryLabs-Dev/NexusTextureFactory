@@ -1,6 +1,7 @@
 import { getToolkitTool } from './catalog.mjs';
 import { buildExternalInstructions } from './adapters/browserExternal.mjs';
 import { pushToolkitLog, setLastRun } from './state.mjs';
+import { cancelCaptureVideoJob, cancelPreviewVideoJob, getCaptureVideoStatus, getPreviewVideoStatus, reviewCaptureVideo } from './videoJobs.mjs';
 
 function buildRunPayload({ category, tool, executionMode, status, result = null, instructions = '', args = {} }) {
   return {
@@ -15,7 +16,7 @@ function buildRunPayload({ category, tool, executionMode, status, result = null,
   };
 }
 
-export function runToolkitTool(state, { category, tool, args = {} }) {
+export async function runToolkitTool(state, { category, tool, args = {} }) {
   const match = getToolkitTool(category, tool);
   if (!match) {
     throw new Error(`Unknown toolkit tool: ${category}.${tool}`);
@@ -43,6 +44,33 @@ export function runToolkitTool(state, { category, tool, args = {} }) {
     payload = buildRunPayload({ category, tool, executionMode: 'server_local', status: 'completed', result: { app: state.app }, args });
   } else if (category === 'capture' && tool === 'latest') {
     payload = buildRunPayload({ category, tool, executionMode: 'server_local', status: 'completed', result: state.lastRun, args });
+  } else if (category === 'capture' && tool === 'video_status') {
+    const result = getCaptureVideoStatus(state, args.job_id);
+    payload = buildRunPayload({ category, tool, executionMode: 'server_local', status: result.status, result, args });
+  } else if (category === 'capture' && tool === 'review_saved_video') {
+    const result = await reviewCaptureVideo(state, {
+      outputPath: args.output_path,
+      frameCount: args.frame_count,
+      metadata: args.metadata
+    });
+    payload = buildRunPayload({ category, tool, executionMode: 'server_local', status: result.status, result, args });
+  } else if (category === 'capture' && tool === 'cancel_video') {
+    const result = await cancelCaptureVideoJob(state, args.job_id);
+    payload = buildRunPayload({ category, tool, executionMode: 'server_local', status: result.status, result, args });
+  } else if (category === 'capture' && tool === 'render_set_video') {
+    payload = buildRunPayload({
+      category,
+      tool,
+      executionMode: 'hybrid',
+      status: 'queued_manual',
+      result: {
+        set_name: args.set_name || '',
+        preset_name: args.preset_name || '',
+        output_name: args.output_name || ''
+      },
+      instructions: buildExternalInstructions(category, tool, args, state),
+      args
+    });
   } else if (category === 'loop' && tool === 'status') {
     payload = buildRunPayload({ category, tool, executionMode: 'server_local', status: 'completed', result: { loop: state.loop }, args });
   } else if (category === 'loop' && tool === 'stop') {
@@ -70,6 +98,25 @@ export function runToolkitTool(state, { category, tool, args = {} }) {
       executionMode: 'hybrid',
       status: 'queued_manual',
       result: { pass_name: args.pass_name || 'preview_visibility' },
+      instructions: buildExternalInstructions(category, tool, args, state),
+      args
+    });
+  } else if (category === 'preview' && tool === 'video_status') {
+    const result = getPreviewVideoStatus(state, args.job_id);
+    payload = buildRunPayload({ category, tool, executionMode: 'server_local', status: result.status, result, args });
+  } else if (category === 'preview' && tool === 'cancel_video') {
+    const result = await cancelPreviewVideoJob(state, args.job_id);
+    payload = buildRunPayload({ category, tool, executionMode: 'server_local', status: result.status, result, args });
+  } else if (category === 'preview' && tool === 'render_video') {
+    payload = buildRunPayload({
+      category,
+      tool,
+      executionMode: 'hybrid',
+      status: 'queued_manual',
+      result: {
+        preset_name: args.preset_name || '',
+        output_name: args.output_name || ''
+      },
       instructions: buildExternalInstructions(category, tool, args, state),
       args
     });
