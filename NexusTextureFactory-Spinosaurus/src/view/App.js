@@ -3,6 +3,7 @@
                 <button onClick={() => uiVM.setActiveTab('generator')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'generator' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>FACTORY</button>
                 <button onClick={() => uiVM.setActiveTab('sets')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'sets' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>SETS</button>
                 <button onClick={() => uiVM.setActiveTab('preview')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'preview' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>PREVIEW</button>
+                <button onClick={() => uiVM.setActiveTab('capture')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'capture' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>CAPTURE</button>
                 <button onClick={() => uiVM.setActiveTab('flipbook')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'flipbook' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>FLIPBOOK</button>
                 <button onClick={() => uiVM.setActiveTab('filters')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'filters' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>FILTERS</button>
                 <button onClick={() => uiVM.setActiveTab('operations')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'operations' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>OPERATIONS</button>
@@ -15,6 +16,12 @@
 
         function App() {
             const vm = useAppViewModel();
+            React.useEffect(() => {
+                window.__spinosaurusVm = vm;
+                return () => {
+                    if (window.__spinosaurusVm === vm) delete window.__spinosaurusVm;
+                };
+            }, [vm]);
             return (
                 <div className="flex flex-col h-screen bg-[#111] text-gray-200 font-sans">
                     <NavBar uiVM={vm.ui} />
@@ -27,6 +34,7 @@
                         {vm.ui.activeTab === 'generator' && <GeneratorTab dVM={vm.dream} libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} flipbookVM={vm.flipbook} />}
                         {vm.ui.activeTab === 'sets' && <SetsTab libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} flipbookVM={vm.flipbook} />}
                         {vm.ui.activeTab === 'preview' && <PreviewTab previewVM={vm.preview} uiVM={vm.ui} />}
+                        {vm.ui.activeTab === 'capture' && <CaptureTab captureVM={vm.capture} uiVM={vm.ui} />}
                         {vm.ui.activeTab === 'flipbook' && <FlipbookTab flipbookVM={vm.flipbook} />}
                         {vm.ui.activeTab === 'filters' && <FiltersTab filtersVM={vm.filters} />}
                         {vm.ui.activeTab === 'operations' && <OperationsTab customOpsVM={vm.customOps} />}

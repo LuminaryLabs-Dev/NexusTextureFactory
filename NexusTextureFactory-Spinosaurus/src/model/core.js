@@ -969,6 +969,48 @@ void main() {
 	                const hash = computeAlphaHash(pixels, this.width, this.height);
 	                return { density, sScore, circularity, squareness, hash };
 	            }
+	            dispose() {
+	                const gl = this.gl;
+	                if (!gl) return;
+	                const deleteFboEntry = (entry) => {
+	                    if (!entry) return;
+	                    if (entry.texture) gl.deleteTexture(entry.texture);
+	                    if (entry.fbo) gl.deleteFramebuffer(entry.fbo);
+	                };
+	                this.stepTextures.forEach(deleteFboEntry);
+	                this.scratchTextures.forEach(deleteFboEntry);
+	                this.stepTextures = [];
+	                this.scratchTextures = [];
+	                if (this.libraryTexture) {
+	                    gl.deleteTexture(this.libraryTexture);
+	                    this.libraryTexture = null;
+	                }
+	                Object.values(this.customPrograms || {}).forEach((meta) => {
+	                    if (meta?.program) gl.deleteProgram(meta.program);
+	                });
+	                this.customPrograms = {};
+	                if (this.morphPassMeta?.program) gl.deleteProgram(this.morphPassMeta.program);
+	                if (this.blendPassMeta?.program) gl.deleteProgram(this.blendPassMeta.program);
+	                if (this.program) gl.deleteProgram(this.program);
+	                if (this.quad) gl.deleteBuffer(this.quad);
+	                this.baseProgramMeta = null;
+	                this.morphPassMeta = null;
+	                this.blendPassMeta = null;
+	                this.program = null;
+	                this.quad = null;
+	                this.readbackPixels = null;
+	                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+	                gl.bindTexture(gl.TEXTURE_2D, null);
+	                gl.bindBuffer(gl.ARRAY_BUFFER, null);
+	                const loseContext = gl.getExtension('WEBGL_lose_context');
+	                if (loseContext) loseContext.loseContext();
+	                if (this.canvas) {
+	                    this.canvas.width = 1;
+	                    this.canvas.height = 1;
+	                }
+	                this.gl = null;
+	                this.canvas = null;
+	            }
 	        }
 
         // ==========================================

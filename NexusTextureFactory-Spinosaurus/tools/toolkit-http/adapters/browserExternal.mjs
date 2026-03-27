@@ -30,6 +30,10 @@ export function buildExternalInstructions(category, tool, args = {}, state) {
     base.push('Open the PREVIEW controls and apply the requested patch manually through Browser View inputs.');
   } else if (category === 'preview' && tool === 'run_validation_pass') {
     base.push('Run the preview flow manually, capture before/after screenshots, and compare the visible result.');
+  } else if (category === 'preview' && tool === 'render_video') {
+    base.push('Open the PREVIEW tab, open the Record drawer, verify the requested export settings, and start the offline MP4 render.');
+  } else if (category === 'capture' && tool === 'render_set_video') {
+    base.push('Open the CAPTURE tab, choose the requested set, verify the lineup and export settings, and start the Download Video render.');
   } else if (category === 'loop' && tool === 'run') {
     base.push('Repeat the requested validation loop manually in Browser View until the visible result is proven.');
   }

@@ -9,6 +9,13 @@
         const PREVIEW_BLEND_MODES = ['alpha', 'additive'];
         const PREVIEW_BILLBOARD_MODES = ['spherical'];
         const PREVIEW_PRESET_SOURCE_MODES = ['fallback_square_50', 'selected_or_fallback'];
+        const PREVIEW_CAPTURE_FORMATS = ['mp4'];
+        const PREVIEW_CAPTURE_CODECS = ['h264'];
+        const PREVIEW_CAPTURE_CAMERA_MODES = ['hold_current', 'hold_preset', 'orbit_yaw', 'orbit_drift', 'dolly_x', 'dolly_z', 'pedestal_y', 'stage_scroll_x', 'figure8', 'keyframed'];
+        const PREVIEW_CAPTURE_ACTIVITY_MODES = ['all_together', 'focused_only', 'hybrid_fade'];
+        const PREVIEW_CAPTURE_STAGE_MODES = ['none', 'grid_floor', 'cube_lane_5u', 'distance_ticks_5u', 'bounds_box'];
+        const PREVIEW_CAPTURE_START_MODES = ['continue_live', 'reset_no_warmup', 'reset_and_warmup', 'loop_locked'];
+        const PREVIEW_CAPTURE_REVIEW_FRAME_COUNT = 5;
         const PREVIEW_MODULE_KEYS = ['main', 'emission', 'shape', 'velocityOverLifetime', 'forceOverLifetime', 'limitVelocityOverLifetime', 'noise', 'colorOverLifetime', 'colorBySpeed', 'sizeOverLifetime', 'sizeBySpeed', 'rotationOverLifetime', 'rotationBySpeed', 'collision', 'subEmitters', 'textureSheetAnimation', 'inheritVelocity', 'lifetimeByEmitterSpeed', 'trails', 'customData', 'renderer'];
         const PREVIEW_SCALAR_PARAMETER_MODES = ['constant', 'two_constants', 'curve', 'two_curves'];
         const PREVIEW_COLOR_PARAMETER_MODES = ['color', 'two_colors', 'gradient', 'two_gradients'];
@@ -755,6 +762,174 @@
             };
         }
 
+        function sanitizePreviewOutputName(value, presetName = 'preview') {
+            const baseName = String(value || `${presetName}-preview.mp4`).trim() || `${presetName}-preview.mp4`;
+            const safe = baseName.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, '-').replace(/\s+/g, '-');
+            return safe.toLowerCase().endsWith('.mp4') ? safe : `${safe}.mp4`;
+        }
+
+        function createDefaultPreviewCaptureConfig(presetName = 'Turbulence Demo') {
+            return {
+                durationSeconds: 120,
+                fps: 30,
+                width: 1280,
+                height: 720,
+                format: 'mp4',
+                codec: 'h264',
+                cameraMode: 'stage_scroll_x',
+                stageMode: 'cube_lane_5u',
+                stageSpacing: 5,
+                stageLength: 60,
+                stageCount: 13,
+                simulationStartMode: 'reset_and_warmup',
+                warmupSeconds: PREVIEW_WARMUP_SECONDS,
+                outputName: sanitizePreviewOutputName(`${presetName}-preview.mp4`, presetName),
+                orbitRadius: 7.2,
+                orbitSpeed: 0.08,
+                orbitPitch: 24,
+                orbitDriftAmount: 8,
+                dollyDistance: 12,
+                pedestalHeight: 4,
+                stageScrollTravel: 40,
+                targetOffset: [0, 0.6, 0],
+                keyframes: [
+                    { time: 0, position: [-8, 3.2, 8], target: [0, 0.6, 0] },
+                    { time: 0.5, position: [0, 4.4, 6.6], target: [0, 0.7, 0] },
+                    { time: 1, position: [8, 3.2, 8], target: [0, 0.6, 0] }
+                ]
+            };
+        }
+
+        function normalizePreviewCaptureKeyframes(value, fallback) {
+            const source = Array.isArray(value) && value.length ? value : fallback;
+            return source.map((entry, index) => ({
+                time: clampPreviewValue(isFiniteNumber(entry?.time) ? entry.time : (index / Math.max(1, source.length - 1)), 0, 1),
+                position: normalizePreviewArray(entry?.position, 3, fallback[Math.min(index, fallback.length - 1)]?.position || [0, 3, 6]),
+                target: normalizePreviewArray(entry?.target, 3, fallback[Math.min(index, fallback.length - 1)]?.target || [0, 0.6, 0])
+            })).sort((a, b) => a.time - b.time);
+        }
+
+        function normalizePreviewCaptureConfig(value, presetName = 'Turbulence Demo') {
+            const fallback = createDefaultPreviewCaptureConfig(presetName);
+            const input = value && typeof value === 'object' ? value : {};
+            return {
+                durationSeconds: clampPreviewValue(isFiniteNumber(input.durationSeconds) ? input.durationSeconds : fallback.durationSeconds, 1, 600),
+                fps: Math.max(1, Math.min(60, Math.round(isFiniteNumber(input.fps) ? input.fps : fallback.fps))),
+                width: Math.max(64, Math.min(4096, Math.round(isFiniteNumber(input.width) ? input.width : fallback.width))),
+                height: Math.max(64, Math.min(4096, Math.round(isFiniteNumber(input.height) ? input.height : fallback.height))),
+                format: PREVIEW_CAPTURE_FORMATS.includes(input.format) ? input.format : fallback.format,
+                codec: PREVIEW_CAPTURE_CODECS.includes(input.codec) ? input.codec : fallback.codec,
+                cameraMode: PREVIEW_CAPTURE_CAMERA_MODES.includes(input.cameraMode) ? input.cameraMode : fallback.cameraMode,
+                stageMode: PREVIEW_CAPTURE_STAGE_MODES.includes(input.stageMode) ? input.stageMode : fallback.stageMode,
+                stageSpacing: Math.max(1, isFiniteNumber(input.stageSpacing) ? input.stageSpacing : fallback.stageSpacing),
+                stageLength: Math.max(5, isFiniteNumber(input.stageLength) ? input.stageLength : fallback.stageLength),
+                stageCount: Math.max(3, Math.round(isFiniteNumber(input.stageCount) ? input.stageCount : fallback.stageCount)),
+                simulationStartMode: PREVIEW_CAPTURE_START_MODES.includes(input.simulationStartMode) ? input.simulationStartMode : fallback.simulationStartMode,
+                warmupSeconds: clampPreviewValue(isFiniteNumber(input.warmupSeconds) ? input.warmupSeconds : fallback.warmupSeconds, 0, 10),
+                outputName: sanitizePreviewOutputName(input.outputName, presetName),
+                orbitRadius: Math.max(0.5, isFiniteNumber(input.orbitRadius) ? input.orbitRadius : fallback.orbitRadius),
+                orbitSpeed: Math.max(0.001, isFiniteNumber(input.orbitSpeed) ? input.orbitSpeed : fallback.orbitSpeed),
+                orbitPitch: clampPreviewValue(isFiniteNumber(input.orbitPitch) ? input.orbitPitch : fallback.orbitPitch, -89, 89),
+                orbitDriftAmount: clampPreviewValue(isFiniteNumber(input.orbitDriftAmount) ? input.orbitDriftAmount : fallback.orbitDriftAmount, 0, 45),
+                dollyDistance: Math.max(0.5, isFiniteNumber(input.dollyDistance) ? input.dollyDistance : fallback.dollyDistance),
+                pedestalHeight: Math.max(0, isFiniteNumber(input.pedestalHeight) ? input.pedestalHeight : fallback.pedestalHeight),
+                stageScrollTravel: Math.max(1, isFiniteNumber(input.stageScrollTravel) ? input.stageScrollTravel : fallback.stageScrollTravel),
+                targetOffset: normalizePreviewArray(input.targetOffset, 3, fallback.targetOffset),
+                keyframes: normalizePreviewCaptureKeyframes(input.keyframes, fallback.keyframes)
+            };
+        }
+
+        function createDefaultCaptureLineupConfig(setName = 'Texture Set', presetName = 'Turbulence Demo') {
+            return {
+                setId: '',
+                stackSpacing: 5,
+                sequentialReveal: false,
+                activityMode: 'all_together',
+                secondsPerStack: 2,
+                revealLeadSeconds: 0,
+                holdSeconds: 1.65,
+                fadeSeconds: 0.35,
+                cameraMode: 'stage_scroll_x',
+                travelDistance: 40,
+                width: 1920,
+                height: 1080,
+                fps: 30,
+                durationSeconds: 2,
+                outputName: sanitizePreviewOutputName(`${setName}__${presetName}__capture.mp4`, `${setName}-${presetName}`),
+                stageMode: 'cube_lane_5u',
+                stageSpacing: 5,
+                simulationStartMode: 'reset_and_warmup',
+                warmupSeconds: PREVIEW_WARMUP_SECONDS,
+                targetOffset: [0, 0.7, 0],
+                orbitRadius: 8.4,
+                orbitSpeed: 0.08,
+                orbitPitch: 22,
+                orbitDriftAmount: 8,
+                dollyDistance: 14,
+                pedestalHeight: 4.5,
+                stageScrollTravel: 40,
+                keyframes: createDefaultPreviewCaptureConfig(presetName).keyframes
+            };
+        }
+
+        function resolveCaptureLineupDurationSeconds(config, entryCount = 1) {
+            const count = Math.max(1, Math.round(isFiniteNumber(entryCount) ? entryCount : 1));
+            const secondsPerStack = Math.max(0.25, isFiniteNumber(config?.secondsPerStack) ? config.secondsPerStack : 2);
+            return Number((count * secondsPerStack).toFixed(3));
+        }
+
+        function normalizeCaptureLineupConfig(value, setName = 'Texture Set', presetName = 'Turbulence Demo') {
+            const fallback = createDefaultCaptureLineupConfig(setName, presetName);
+            const input = value && typeof value === 'object' ? value : {};
+            const activityMode = PREVIEW_CAPTURE_ACTIVITY_MODES.includes(input.activityMode) ? input.activityMode : fallback.activityMode;
+            const isLegacyConfig = !PREVIEW_CAPTURE_ACTIVITY_MODES.includes(input.activityMode);
+            const baseCapture = normalizePreviewCaptureConfig({
+                ...fallback,
+                ...input,
+                outputName: input.outputName || fallback.outputName,
+                stageMode: input.stageMode || fallback.stageMode,
+                stageSpacing: input.stageSpacing || fallback.stageSpacing,
+                simulationStartMode: input.simulationStartMode || fallback.simulationStartMode,
+                warmupSeconds: input.warmupSeconds ?? fallback.warmupSeconds,
+                targetOffset: input.targetOffset || fallback.targetOffset
+            }, `${setName}-${presetName}`);
+            return {
+                ...baseCapture,
+                setId: typeof input.setId === 'string' ? input.setId : fallback.setId,
+                stackSpacing: Math.max(1, isFiniteNumber(input.stackSpacing) ? input.stackSpacing : fallback.stackSpacing),
+                sequentialReveal: isLegacyConfig
+                    ? false
+                    : (typeof input.sequentialReveal === 'boolean' ? input.sequentialReveal : activityMode === 'focused_only'),
+                activityMode,
+                secondsPerStack: clampPreviewValue(isFiniteNumber(input.secondsPerStack) ? input.secondsPerStack : fallback.secondsPerStack, 0.25, 30),
+                revealLeadSeconds: clampPreviewValue(isFiniteNumber(input.revealLeadSeconds) ? input.revealLeadSeconds : fallback.revealLeadSeconds, 0, 30),
+                holdSeconds: clampPreviewValue(isFiniteNumber(input.holdSeconds) ? input.holdSeconds : fallback.holdSeconds, 0.1, 30),
+                fadeSeconds: clampPreviewValue(isFiniteNumber(input.fadeSeconds) ? input.fadeSeconds : fallback.fadeSeconds, 0, 30),
+                cameraMode: isLegacyConfig
+                    ? fallback.cameraMode
+                    : (PREVIEW_CAPTURE_CAMERA_MODES.includes(input.cameraMode) ? input.cameraMode : fallback.cameraMode),
+                travelDistance: Math.max(1, isFiniteNumber(input.travelDistance) ? input.travelDistance : fallback.travelDistance),
+                width: baseCapture.width,
+                height: baseCapture.height,
+                fps: baseCapture.fps,
+                durationSeconds: baseCapture.durationSeconds,
+                outputName: sanitizePreviewOutputName(input.outputName || fallback.outputName, `${setName}-${presetName}`),
+                stageMode: baseCapture.stageMode,
+                stageSpacing: baseCapture.stageSpacing,
+                simulationStartMode: baseCapture.simulationStartMode,
+                warmupSeconds: baseCapture.warmupSeconds,
+                targetOffset: baseCapture.targetOffset,
+                orbitRadius: baseCapture.orbitRadius,
+                orbitSpeed: baseCapture.orbitSpeed,
+                orbitPitch: baseCapture.orbitPitch,
+                orbitDriftAmount: baseCapture.orbitDriftAmount,
+                dollyDistance: baseCapture.dollyDistance,
+                pedestalHeight: baseCapture.pedestalHeight,
+                stageScrollTravel: Math.max(1, isFiniteNumber(input.stageScrollTravel) ? input.stageScrollTravel : Math.max(fallback.stageScrollTravel, isFiniteNumber(input.travelDistance) ? input.travelDistance : fallback.travelDistance)),
+                keyframes: baseCapture.keyframes
+            };
+        }
+
         function createDefaultPreviewPreset() {
             return {
                 version: PREVIEW_PRESET_VERSION,
@@ -771,7 +946,8 @@
                     cameraYaw: 32,
                     grid: true,
                     timeScale: 1,
-                    loop: true
+                    loop: true,
+                    capture: createDefaultPreviewCaptureConfig('Turbulence Demo')
                 },
                 layers: [createDefaultPreviewLayer(0)]
             };
@@ -1085,7 +1261,8 @@
                     cameraYaw: isFiniteNumber(scene.cameraYaw) ? scene.cameraYaw : base.scene.cameraYaw,
                     grid: typeof scene.grid === 'boolean' ? scene.grid : base.scene.grid,
                     timeScale: clampPreviewValue(isFiniteNumber(scene.timeScale) ? scene.timeScale : base.scene.timeScale, 0, 3),
-                    loop: typeof scene.loop === 'boolean' ? scene.loop : base.scene.loop
+                    loop: typeof scene.loop === 'boolean' ? scene.loop : base.scene.loop,
+                    capture: normalizePreviewCaptureConfig(scene.capture, input.name || base.name)
                 },
                 layers
             };
@@ -1097,6 +1274,10 @@
             if (preset.version !== PREVIEW_PRESET_VERSION) errors.push(`Preset version must be ${PREVIEW_PRESET_VERSION}.`);
             if (!String(preset.name || '').trim()) errors.push('Preset name is required.');
             if (!Array.isArray(preset.layers) || preset.layers.length < 1) errors.push('At least one layer is required.');
+            if (!PREVIEW_CAPTURE_CAMERA_MODES.includes(preset.scene.capture.cameraMode)) errors.push('Scene capture cameraMode is invalid.');
+            if (!PREVIEW_CAPTURE_STAGE_MODES.includes(preset.scene.capture.stageMode)) errors.push('Scene capture stageMode is invalid.');
+            if (!PREVIEW_CAPTURE_START_MODES.includes(preset.scene.capture.simulationStartMode)) errors.push('Scene capture simulationStartMode is invalid.');
+            if (preset.scene.capture.width < 64 || preset.scene.capture.height < 64) errors.push('Scene capture resolution is invalid.');
             const seenLayerIds = new Set();
             let totalParticles = 0;
             preset.layers.forEach((layer, index) => {
@@ -1403,6 +1584,31 @@
             };
         }
 
+        function clonePreviewParticleSnapshot(particle) {
+            return {
+                alive: particle.alive === true,
+                age: particle.age,
+                lifetime: particle.lifetime,
+                rotation: particle.rotation,
+                angularVelocity: particle.angularVelocity,
+                size: particle.size,
+                baseSize: particle.baseSize,
+                alpha: particle.alpha,
+                speed: particle.speed,
+                uvTransform: Array.isArray(particle.uvTransform) ? [...particle.uvTransform] : [1, 1, 0, 0],
+                customData1: particle.customData1,
+                customData2: particle.customData2,
+                spawnDepth: particle.spawnDepth,
+                emitterSpeedAtSpawn: particle.emitterSpeedAtSpawn,
+                seed: particle.seed.clone(),
+                baseColor: particle.baseColor.clone(),
+                color: particle.color.clone(),
+                position: particle.position.clone(),
+                velocity: particle.velocity.clone(),
+                trailHistory: Array.isArray(particle.trailHistory) ? particle.trailHistory.map((entry) => entry.clone()) : []
+            };
+        }
+
         class PreviewParticleLayer {
             constructor(runtime, authoringLayer, sceneConfig) {
                 this.runtime = runtime;
@@ -1422,6 +1628,7 @@
                 this.renderMesh = this.renderState.mesh;
                 this.trailState = this.createTrailState();
                 this.trailMesh = this.trailState.mesh;
+                this.alphaMultiplier = 1;
                 this.reset();
             }
 
@@ -1634,11 +1841,85 @@
                 this.previousEmitterPosition.copy(this.compiled.shape.position);
                 this.emitterVelocity.set(0, 0, 0);
                 this.nextSpawnIndex = 0;
+                this.alphaMultiplier = 1;
                 this.particles.forEach((particle) => {
                     particle.alive = false;
                     particle.age = 0;
                     particle.alpha = 0;
                     particle.trailHistory = [];
+                });
+                this.updateRenderBuffers();
+            }
+
+            createSimulationSnapshot() {
+                return {
+                    nextSpawnIndex: this.nextSpawnIndex,
+                    absoluteTime: this.absoluteTime,
+                    prevAbsoluteTime: this.prevAbsoluteTime,
+                    emitterLoops: this.emitterLoops,
+                    rateAccumulator: this.rateAccumulator,
+                    pendingExternalSpawns: this.pendingExternalSpawns.map((entry) => ({
+                        count: entry.count,
+                        position: entry.position ? entry.position.clone() : null,
+                        velocity: entry.velocity ? entry.velocity.clone() : null,
+                        color: entry.color ? entry.color.clone() : null,
+                        sizeScale: entry.sizeScale,
+                        triggerDepth: entry.triggerDepth
+                    })),
+                    previousEmitterPosition: this.previousEmitterPosition.clone(),
+                    emitterVelocity: this.emitterVelocity.clone(),
+                    particles: this.particles.map((particle) => clonePreviewParticleSnapshot(particle))
+                };
+            }
+
+            restoreSimulationSnapshot(snapshot) {
+                if (!snapshot) {
+                    this.reset();
+                    return;
+                }
+                this.nextSpawnIndex = snapshot.nextSpawnIndex || 0;
+                this.absoluteTime = snapshot.absoluteTime || 0;
+                this.prevAbsoluteTime = snapshot.prevAbsoluteTime || 0;
+                this.emitterLoops = snapshot.emitterLoops || 0;
+                this.rateAccumulator = snapshot.rateAccumulator || 0;
+                this.pendingExternalSpawns = Array.isArray(snapshot.pendingExternalSpawns) ? snapshot.pendingExternalSpawns.map((entry) => ({
+                    count: entry.count,
+                    position: entry.position ? entry.position.clone() : null,
+                    velocity: entry.velocity ? entry.velocity.clone() : null,
+                    color: entry.color ? entry.color.clone() : null,
+                    sizeScale: entry.sizeScale,
+                    triggerDepth: entry.triggerDepth
+                })) : [];
+                this.previousEmitterPosition.copy(snapshot.previousEmitterPosition || this.compiled.shape.position);
+                this.emitterVelocity.copy(snapshot.emitterVelocity || PREVIEW_TMP_VEC3.set(0, 0, 0));
+                this.particles.forEach((particle, index) => {
+                    const source = snapshot.particles?.[index];
+                    if (!source) {
+                        particle.alive = false;
+                        particle.alpha = 0;
+                        particle.trailHistory = [];
+                        return;
+                    }
+                    particle.alive = source.alive === true;
+                    particle.age = source.age || 0;
+                    particle.lifetime = source.lifetime || 1;
+                    particle.rotation = source.rotation || 0;
+                    particle.angularVelocity = source.angularVelocity || 0;
+                    particle.size = source.size || 0;
+                    particle.baseSize = source.baseSize || 0;
+                    particle.alpha = source.alpha || 0;
+                    particle.speed = source.speed || 0;
+                    particle.uvTransform = Array.isArray(source.uvTransform) ? [...source.uvTransform] : [1, 1, 0, 0];
+                    particle.customData1 = source.customData1 || 0;
+                    particle.customData2 = source.customData2 || 0;
+                    particle.spawnDepth = source.spawnDepth || 0;
+                    particle.emitterSpeedAtSpawn = source.emitterSpeedAtSpawn || 0;
+                    particle.seed.copy(source.seed || PREVIEW_TMP_VEC3.set(0.5, 0.5, 0.5));
+                    particle.baseColor.copy(source.baseColor || PREVIEW_TMP_COLOR.set('#ffffff'));
+                    particle.color.copy(source.color || PREVIEW_TMP_COLOR_B.set('#ffffff'));
+                    particle.position.copy(source.position || PREVIEW_TMP_VEC3.set(0, 0, 0));
+                    particle.velocity.copy(source.velocity || PREVIEW_TMP_VEC3_B.set(0, 0, 0));
+                    particle.trailHistory = Array.isArray(source.trailHistory) ? source.trailHistory.map((entry) => entry.clone()) : [];
                 });
                 this.updateRenderBuffers();
             }
@@ -1971,7 +2252,7 @@
                     colorArray[colorOffset] = particle.color.r;
                     colorArray[colorOffset + 1] = particle.color.g;
                     colorArray[colorOffset + 2] = particle.color.b;
-                    colorArray[colorOffset + 3] = particle.alpha;
+                    colorArray[colorOffset + 3] = particle.alpha * this.alphaMultiplier;
                     uvArray[colorOffset] = particle.uvTransform[0];
                     uvArray[colorOffset + 1] = particle.uvTransform[1];
                     uvArray[colorOffset + 2] = particle.uvTransform[2];
@@ -1984,7 +2265,7 @@
                             if (!start || !end) continue;
                             const trailT = segmentIndex / Math.max(1, particle.trailHistory.length - 2);
                             const width = particle.baseSize * evaluatePreviewCurve(this.compiled.trails.widthOverTrail, trailT);
-                            const alpha = particle.alpha * evaluatePreviewCurve(this.compiled.trails.alphaOverTrail, trailT);
+                            const alpha = particle.alpha * this.alphaMultiplier * evaluatePreviewCurve(this.compiled.trails.alphaOverTrail, trailT);
                             if (alpha <= 0.001 || width <= 0.0001) continue;
                             const trailOffset = trailSegmentCount * 3;
                             const trailColorOffset = trailSegmentCount * 4;
@@ -2023,12 +2304,13 @@
                 this.renderMesh.visible = this.compiled.enabled && this.compiled.renderer.enabled;
             }
 
-            step(delta, absoluteTime, cameraForward) {
+            step(delta, absoluteTime, cameraForward, options = {}) {
                 this.prevAbsoluteTime = this.absoluteTime;
                 this.absoluteTime = absoluteTime;
+                this.alphaMultiplier = clampPreviewValue(isFiniteNumber(options.alphaMultiplier) ? options.alphaMultiplier : 1, 0, 1);
                 this.updateEmitterVelocity(delta);
                 this.drainExternalSpawns();
-                const spawnCount = this.getScheduledSpawnCount(delta);
+                const spawnCount = options.emitEnabled === false ? 0 : this.getScheduledSpawnCount(delta);
                 for (let spawnIndex = 0; spawnIndex < spawnCount; spawnIndex++) this.spawnParticle();
                 const localDelta = delta * this.compiled.main.simulationSpeed;
                 this.particles.forEach((particle) => {
@@ -2052,9 +2334,27 @@
                 this.currentPreset = null;
                 this.currentSceneConfig = null;
                 this.sourceTexture = null;
+                this.captureLineup = null;
+                this.captureLineupControllers = [];
+                this.captureLineupCycle = 0;
+                this.captureLineupTextures = [];
+                this.captureLineupFocus = {
+                    index: -1,
+                    stackId: '',
+                    stackName: '',
+                    stackX: 0,
+                    cameraX: 0,
+                    segmentProgress: 0,
+                    secondsPerStack: 0
+                };
                 this.fallbackTexture = null;
                 this.gridHelper = null;
                 this.floorMesh = null;
+                this.captureRenderer = null;
+                this.captureCanvas = null;
+                this.captureStageGroup = null;
+                this.captureSnapshot = null;
+                this.captureInProgress = false;
                 this.mounted = false;
                 this.isPlaying = true;
                 this.timeScale = 1;
@@ -2069,11 +2369,16 @@
                 this.boundPointerDown = null;
                 this.boundPointerMove = null;
                 this.boundPointerUp = null;
+                this.boundWheel = null;
+            }
+
+            getCaptureLineupFocus() {
+                return this.captureLineupFocus ? { ...this.captureLineupFocus } : null;
             }
 
             mount() {
                 if (this.mounted || !this.canvas) return;
-                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
+                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
                 this.renderer.setPixelRatio(window.devicePixelRatio || 1);
                 this.renderer.setSize(this.canvas.clientWidth || 1, this.canvas.clientHeight || 1, false);
                 this.scene = new THREE.Scene();
@@ -2094,6 +2399,10 @@
                 });
                 this.scene.add(this.gridHelper);
 
+                this.captureStageGroup = new THREE.Group();
+                this.captureStageGroup.visible = false;
+                this.scene.add(this.captureStageGroup);
+
                 const ambient = new THREE.AmbientLight(0xffffff, 1.15);
                 const directional = new THREE.DirectionalLight(0xffffff, 1.25);
                 directional.position.set(4, 6, 5);
@@ -2110,6 +2419,7 @@
                 if (!this.canvas || this.boundPointerDown) return;
                 this.boundPointerDown = (event) => {
                     if (event.button !== 0) return;
+                    if (this.captureLineup?.config) return;
                     this.draggingCamera = true;
                     this.lastPointerX = event.clientX;
                     this.lastPointerY = event.clientY;
@@ -2124,7 +2434,7 @@
                     const deltaY = event.clientY - this.lastPointerY;
                     this.lastPointerX = event.clientX;
                     this.lastPointerY = event.clientY;
-                    this.setCameraYaw(this.cameraYaw - deltaX * 0.28);
+                    this.setCameraYaw(this.cameraYaw + deltaX * 0.28);
                     this.setCameraPitch(this.cameraPitch - deltaY * 0.22);
                     event.preventDefault();
                 };
@@ -2135,11 +2445,23 @@
                     }
                     event.preventDefault();
                 };
+                this.boundWheel = (event) => {
+                    const zoomDelta = clampPreviewValue(event.deltaY * 0.01, -2.5, 2.5);
+                    this.cameraDistance = clampPreviewValue(this.cameraDistance + zoomDelta, 2.5, 40);
+                    if (this.captureLineup?.config) {
+                        this.applyCaptureLineupCamera(this.captureLineup.config, this.clock, this.captureLineup.config.durationSeconds);
+                    } else {
+                        this.applyCameraState();
+                    }
+                    this.renderScene(this.renderer, this.camera);
+                    event.preventDefault();
+                };
                 this.canvas.addEventListener('pointerdown', this.boundPointerDown);
                 this.canvas.addEventListener('pointermove', this.boundPointerMove);
                 this.canvas.addEventListener('pointerup', this.boundPointerUp);
                 this.canvas.addEventListener('pointercancel', this.boundPointerUp);
-                this.canvas.style.cursor = 'grab';
+                this.canvas.addEventListener('wheel', this.boundWheel, { passive: false });
+                this.updateCanvasInteractionMode();
             }
 
             unbindCameraControls() {
@@ -2148,11 +2470,18 @@
                 this.canvas.removeEventListener('pointermove', this.boundPointerMove);
                 this.canvas.removeEventListener('pointerup', this.boundPointerUp);
                 this.canvas.removeEventListener('pointercancel', this.boundPointerUp);
+                this.canvas.removeEventListener('wheel', this.boundWheel);
                 this.boundPointerDown = null;
                 this.boundPointerMove = null;
                 this.boundPointerUp = null;
+                this.boundWheel = null;
                 this.draggingCamera = false;
                 this.canvas.style.cursor = '';
+            }
+
+            updateCanvasInteractionMode() {
+                if (!this.canvas) return;
+                this.canvas.style.cursor = this.captureLineup?.config ? 'default' : 'grab';
             }
 
             createFallbackSourceTexture() {
@@ -2171,14 +2500,23 @@
                 return this.fallbackTexture;
             }
 
+            createSourceTexture(imageLike) {
+                if (!imageLike) return null;
+                const texture = new THREE.Texture(imageLike);
+                texture.needsUpdate = true;
+                texture.minFilter = THREE.LinearFilter;
+                texture.magFilter = THREE.LinearFilter;
+                return texture;
+            }
+
+            disposeCaptureLineupTextures() {
+                this.captureLineupTextures.forEach((texture) => texture?.dispose?.());
+                this.captureLineupTextures = [];
+            }
+
             setSourceImage(imageLike) {
                 if (this.sourceTexture) this.sourceTexture.dispose();
-                this.sourceTexture = imageLike ? new THREE.Texture(imageLike) : null;
-                if (this.sourceTexture) {
-                    this.sourceTexture.needsUpdate = true;
-                    this.sourceTexture.minFilter = THREE.LinearFilter;
-                    this.sourceTexture.magFilter = THREE.LinearFilter;
-                }
+                this.sourceTexture = this.createSourceTexture(imageLike);
                 this.layers.forEach((layer) => layer.setSourceTexture(this.sourceTexture));
             }
 
@@ -2189,7 +2527,81 @@
                 if (this.gridHelper) this.gridHelper.position.y = floorY + 0.01;
             }
 
+            createSimulationSnapshot() {
+                return {
+                    clock: this.clock,
+                    accumulator: this.accumulator,
+                    lastTickTime: this.lastTickTime || null,
+                    needsWarmup: this.needsWarmup === true,
+                    isPlaying: this.isPlaying === true,
+                    timeScale: this.timeScale,
+                    baseTimeScale: this.baseTimeScale,
+                    cameraDistance: this.cameraDistance,
+                    cameraPitch: this.cameraPitch,
+                    cameraYaw: this.cameraYaw,
+                    sceneMode: this.captureLineup ? 'capture_lineup' : 'preview',
+                    gridVisible: this.gridHelper ? this.gridHelper.visible : false,
+                    stageVisible: this.captureStageGroup ? this.captureStageGroup.visible : false,
+                    captureLineupCycle: this.captureLineupCycle,
+                    captureLineupControllers: this.captureLineupControllers.map((controller) => ({
+                        layerId: controller.layer?.compiled?.id || '',
+                        started: controller.started === true,
+                        localTime: controller.localTime || 0,
+                        revealAt: controller.revealAt || 0,
+                        holdSeconds: controller.holdSeconds || 0,
+                        fadeSeconds: controller.fadeSeconds || 0
+                    })),
+                    layers: this.layers.map((layer) => ({
+                        id: layer.compiled.id,
+                        snapshot: layer.createSimulationSnapshot()
+                    }))
+                };
+            }
+
+            restoreSimulationSnapshot(snapshot) {
+                if (!snapshot) return;
+                this.clock = snapshot.clock || 0;
+                this.accumulator = snapshot.accumulator || 0;
+                this.lastTickTime = snapshot.lastTickTime || null;
+                this.needsWarmup = snapshot.needsWarmup === true;
+                this.isPlaying = snapshot.isPlaying !== false;
+                this.timeScale = isFiniteNumber(snapshot.timeScale) ? snapshot.timeScale : this.timeScale;
+                this.baseTimeScale = isFiniteNumber(snapshot.baseTimeScale) ? snapshot.baseTimeScale : this.baseTimeScale;
+                this.cameraDistance = isFiniteNumber(snapshot.cameraDistance) ? snapshot.cameraDistance : this.cameraDistance;
+                this.cameraPitch = isFiniteNumber(snapshot.cameraPitch) ? snapshot.cameraPitch : this.cameraPitch;
+                this.cameraYaw = isFiniteNumber(snapshot.cameraYaw) ? snapshot.cameraYaw : this.cameraYaw;
+                if (this.gridHelper) this.gridHelper.visible = snapshot.gridVisible !== false;
+                if (this.captureStageGroup) this.captureStageGroup.visible = snapshot.stageVisible === true;
+                this.captureLineupCycle = Math.max(0, Math.round(snapshot.captureLineupCycle || 0));
+                const controllerState = new Map((snapshot.captureLineupControllers || []).map((entry) => [entry.layerId, entry]));
+                this.captureLineupControllers.forEach((controller) => {
+                    const entry = controllerState.get(controller.layer?.compiled?.id);
+                    controller.started = entry?.started === true;
+                    controller.localTime = entry?.localTime || 0;
+                    controller.revealAt = isFiniteNumber(entry?.revealAt) ? entry.revealAt : controller.revealAt;
+                    controller.holdSeconds = isFiniteNumber(entry?.holdSeconds) ? entry.holdSeconds : controller.holdSeconds;
+                    controller.fadeSeconds = isFiniteNumber(entry?.fadeSeconds) ? entry.fadeSeconds : controller.fadeSeconds;
+                });
+                const byId = new Map((snapshot.layers || []).map((entry) => [entry.id, entry.snapshot]));
+                this.layers.forEach((layer) => layer.restoreSimulationSnapshot(byId.get(layer.compiled.id)));
+                this.captureLineupFocus = this.computeCaptureLineupFocusState(this.captureLineup?.config || {}, this.clock, this.captureLineup?.config?.durationSeconds || 0);
+                this.applyCameraState();
+            }
+
             setPreset(preset) {
+                this.captureLineup = null;
+                this.captureLineupControllers = [];
+                this.captureLineupCycle = 0;
+                this.captureLineupFocus = {
+                    index: -1,
+                    stackId: '',
+                    stackName: '',
+                    stackX: 0,
+                    cameraX: 0,
+                    segmentProgress: 0,
+                    secondsPerStack: 0
+                };
+                this.disposeCaptureLineupTextures();
                 this.currentPreset = sanitizePreviewPreset(preset);
                 this.currentSceneConfig = this.currentPreset.scene;
                 this.baseTimeScale = this.currentSceneConfig.timeScale;
@@ -2201,6 +2613,7 @@
                 this.camera.fov = this.currentSceneConfig.cameraFov;
                 this.camera.updateProjectionMatrix();
                 this.applyCameraState();
+                this.updateCanvasInteractionMode();
                 if (this.gridHelper) this.gridHelper.visible = this.currentSceneConfig.grid;
                 this.layers = this.currentPreset.layers.map((layer) => new PreviewParticleLayer(this, layer, this.currentSceneConfig));
                 this.layerMap = new Map(this.layers.map((layer) => [layer.compiled.id, layer]));
@@ -2211,6 +2624,129 @@
                 });
                 this.updateFloorHeight();
                 this.needsWarmup = true;
+            }
+
+            createCaptureLineupLayer(sourceLayer, stackX, stackId, layerIndex) {
+                const layer = clonePreviewPreset({ layers: [sourceLayer] }).layers[0];
+                layer.id = `${stackId}-${layerIndex}-${Math.random().toString(36).slice(2, 7)}`;
+                const rootPosition = normalizePreviewArray(layer.shape?.position, 3, [0, 0, 0]);
+                const shapePosition = normalizePreviewArray(layer.modules?.shape?.settings?.position, 3, rootPosition);
+                const nextPosition = [shapePosition[0] + stackX, shapePosition[1], shapePosition[2]];
+                layer.shape = { ...(layer.shape || {}), position: nextPosition };
+                layer.modules = {
+                    ...(layer.modules || {}),
+                    shape: {
+                        ...(layer.modules?.shape || {}),
+                        settings: {
+                            ...(layer.modules?.shape?.settings || {}),
+                            position: nextPosition
+                        }
+                    }
+                };
+                return layer;
+            }
+
+            buildCaptureLineupSchedule(config, entryCount) {
+                const count = Math.max(1, entryCount || 1);
+                const secondsPerStack = Math.max(0.25, config.secondsPerStack || 2);
+                if (count === 1) {
+                    return [{
+                        revealAt: 0,
+                        holdSeconds: Math.min(config.holdSeconds, secondsPerStack),
+                        fadeSeconds: Math.min(config.fadeSeconds, Math.max(0, secondsPerStack - Math.min(config.holdSeconds, secondsPerStack)))
+                    }];
+                }
+                return Array.from({ length: count }, (_, index) => {
+                    const revealAt = config.sequentialReveal ? index * secondsPerStack : 0;
+                    const holdSeconds = Math.min(config.holdSeconds, secondsPerStack);
+                    const fadeSeconds = Math.min(config.fadeSeconds, Math.max(0, secondsPerStack - holdSeconds));
+                    return {
+                        revealAt,
+                        holdSeconds,
+                        fadeSeconds
+                    };
+                });
+            }
+
+            setCaptureLineupScene(preset, entries = [], captureConfig = {}) {
+                if (!this.renderer || !this.scene || !this.camera) {
+                    throw new Error('Preview runtime is not ready for capture lineup.');
+                }
+                const sanitizedPreset = sanitizePreviewPreset(preset);
+                const safeEntries = Array.isArray(entries) ? entries.filter((entry) => entry && typeof entry === 'object') : [];
+                const setName = String(captureConfig?.setName || 'Texture Set');
+                const normalizedConfig = {
+                    ...normalizeCaptureLineupConfig(captureConfig, setName, sanitizedPreset.name),
+                    durationSeconds: resolveCaptureLineupDurationSeconds(captureConfig, safeEntries.length)
+                };
+                const centerOffset = Math.max(0, safeEntries.length - 1) * 0.5;
+                const schedule = this.buildCaptureLineupSchedule(normalizedConfig, safeEntries.length);
+
+                this.currentPreset = sanitizedPreset;
+                this.currentSceneConfig = sanitizedPreset.scene;
+                this.baseTimeScale = this.currentSceneConfig.timeScale;
+                this.captureLineup = {
+                    config: normalizedConfig,
+                    entries: safeEntries.map((entry, index) => ({
+                        id: String(entry.id || `stack-${index + 1}`),
+                        name: String(entry.name || `Stack ${index + 1}`),
+                        stackX: (index - centerOffset) * normalizedConfig.stackSpacing,
+                        revealAt: schedule[index]?.revealAt || 0
+                    }))
+                };
+                this.captureLineupControllers = [];
+                this.captureLineupCycle = 0;
+                this.captureLineupFocus = {
+                    index: safeEntries.length ? 0 : -1,
+                    stackId: safeEntries[0]?.id || '',
+                    stackName: safeEntries[0]?.name || '',
+                    stackX: safeEntries.length ? (0 - centerOffset) * normalizedConfig.stackSpacing : 0,
+                    cameraX: safeEntries.length ? (0 - centerOffset) * normalizedConfig.stackSpacing : 0,
+                    segmentProgress: 0,
+                    secondsPerStack: normalizedConfig.secondsPerStack
+                };
+                this.disposeCaptureLineupTextures();
+                this.clearLayers();
+                this.scene.background = new THREE.Color(this.currentSceneConfig.background);
+                this.camera.fov = this.currentSceneConfig.cameraFov;
+                this.camera.updateProjectionMatrix();
+                this.cameraDistance = this.currentSceneConfig.cameraDistance;
+                this.cameraPitch = this.currentSceneConfig.cameraPitch;
+                this.cameraYaw = this.currentSceneConfig.cameraYaw;
+                const stageCount = Math.max(3, Math.ceil((Math.max(normalizedConfig.travelDistance, normalizedConfig.stackSpacing * Math.max(1, safeEntries.length)) / Math.max(1, normalizedConfig.stageSpacing))) + 4);
+                this.buildCaptureStage({ ...normalizedConfig, stageCount, stageLength: normalizedConfig.travelDistance });
+                if (this.gridHelper) this.gridHelper.visible = normalizedConfig.stageMode === 'grid_floor' || this.currentSceneConfig.grid;
+                this.captureLineup.entries.forEach((entry, entryIndex) => {
+                    const texture = this.createSourceTexture(safeEntries[entryIndex]?.image);
+                    if (texture) this.captureLineupTextures.push(texture);
+                    sanitizedPreset.layers.forEach((sourceLayer, layerIndex) => {
+                        const nextLayer = this.createCaptureLineupLayer(sourceLayer, entry.stackX, entry.id, layerIndex);
+                        const runtimeLayer = new PreviewParticleLayer(this, nextLayer, this.currentSceneConfig);
+                        runtimeLayer.setSourceTexture(texture || null);
+                        this.layers.push(runtimeLayer);
+                        this.scene.add(runtimeLayer.renderMesh);
+                        this.scene.add(runtimeLayer.trailMesh);
+                        this.captureLineupControllers.push({
+                            layer: runtimeLayer,
+                            stackId: entry.id,
+                            stackName: entry.name,
+                            stackX: entry.stackX,
+                            started: false,
+                            localTime: 0,
+                            revealAt: schedule[entryIndex]?.revealAt || 0,
+                            holdSeconds: schedule[entryIndex]?.holdSeconds || normalizedConfig.holdSeconds,
+                            fadeSeconds: schedule[entryIndex]?.fadeSeconds || normalizedConfig.fadeSeconds
+                        });
+                    });
+                });
+                this.layerMap = new Map(this.layers.map((layer) => [layer.compiled.id, layer]));
+                this.clock = 0;
+                this.accumulator = 0;
+                this.lastTickTime = null;
+                this.needsWarmup = false;
+                this.updateCanvasInteractionMode();
+                this.applyCaptureLineupCamera(normalizedConfig, 0, normalizedConfig.durationSeconds);
+                this.renderScene(this.renderer, this.camera);
             }
 
             queueLayerSpawn(layerId, event) {
@@ -2254,7 +2790,19 @@
                 this.accumulator = 0;
                 this.lastTickTime = null;
                 this.layers.forEach((layer) => layer.reset());
+                this.captureLineupControllers.forEach((controller) => {
+                    controller.started = false;
+                    controller.localTime = 0;
+                });
+                this.captureLineupCycle = 0;
+                this.captureLineupFocus = this.computeCaptureLineupFocusState(this.captureLineup?.config || {}, 0, this.captureLineup?.config?.durationSeconds || 0);
                 this.needsWarmup = true;
+            }
+
+            setCameraFromPositionAndTarget(position, target) {
+                if (!this.camera) return;
+                this.camera.position.copy(position);
+                this.camera.lookAt(target);
             }
 
             resize(width, height, dpr = window.devicePixelRatio || 1) {
@@ -2276,14 +2824,33 @@
                 this.needsWarmup = false;
             }
 
+            warmupForSeconds(seconds) {
+                const safeSeconds = Math.max(0, Number(seconds) || 0);
+                if (safeSeconds <= 0) {
+                    this.needsWarmup = false;
+                    return;
+                }
+                const steps = Math.max(1, Math.round(safeSeconds / PREVIEW_FIXED_TIMESTEP));
+                for (let index = 0; index < steps; index++) {
+                    this.clock += PREVIEW_FIXED_TIMESTEP;
+                    this.stepSimulation(PREVIEW_FIXED_TIMESTEP, this.clock);
+                }
+                this.needsWarmup = false;
+            }
+
             stepSimulation(delta, absoluteTime) {
                 const cameraMatrix = this.camera.matrixWorld;
                 const forward = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 2).negate();
+                if (this.captureLineup?.config) {
+                    this.stepCaptureLineup(delta, absoluteTime, forward);
+                    return;
+                }
                 this.layers.forEach((layer) => layer.step(delta, absoluteTime, forward));
             }
 
             tick(nowMs) {
                 if (!this.renderer || !this.scene || !this.camera) return;
+                if (this.captureInProgress) return;
                 const nextTime = nowMs * 0.001;
                 if (!this.lastTickTime) this.lastTickTime = nextTime;
                 const dt = Math.min(0.25, Math.max(0, nextTime - this.lastTickTime));
@@ -2299,7 +2866,13 @@
                         steps++;
                     }
                 }
-                const cameraMatrix = this.camera.matrixWorld;
+                this.renderScene(this.renderer, this.camera);
+            }
+
+            renderScene(renderer = this.renderer, camera = this.camera) {
+                if (!renderer || !camera) return;
+                camera.updateMatrixWorld();
+                const cameraMatrix = camera.matrixWorld;
                 const right = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 0);
                 const up = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 1);
                 const forward = new THREE.Vector3().setFromMatrixColumn(cameraMatrix, 2).negate();
@@ -2309,7 +2882,365 @@
                     layer.trailState.material.uniforms.uCameraForward.value.copy(forward);
                     layer.renderMesh.visible = layer.compiled.enabled && layer.compiled.renderer.enabled;
                 });
-                this.renderer.render(this.scene, this.camera);
+                renderer.render(this.scene, camera);
+            }
+
+            ensureCaptureRenderer(width, height) {
+                this.captureCanvas = this.canvas;
+                this.captureRenderer = this.renderer;
+                this.captureRenderer.setPixelRatio(1);
+                this.captureRenderer.setSize(width, height, false);
+                this.camera.aspect = width / Math.max(1, height);
+                this.camera.updateProjectionMatrix();
+                return this.captureRenderer;
+            }
+
+            clearCaptureStage() {
+                if (!this.captureStageGroup) return;
+                while (this.captureStageGroup.children.length > 0) {
+                    const child = this.captureStageGroup.children[0];
+                    this.captureStageGroup.remove(child);
+                    if (child?.geometry?.dispose) child.geometry.dispose();
+                    if (Array.isArray(child?.material)) child.material.forEach((entry) => entry?.dispose?.());
+                    else child?.material?.dispose?.();
+                }
+            }
+
+            computeCaptureLineupFocusState(config, elapsedSeconds, totalDuration) {
+                const entries = this.captureLineup?.entries || [];
+                const secondsPerStack = Math.max(0.25, config?.secondsPerStack || 2);
+                const spacing = Math.max(1, config?.stackSpacing || 5);
+                if (!entries.length) {
+                    return {
+                        index: -1,
+                        stackId: '',
+                        stackName: '',
+                        stackX: 0,
+                        cameraX: 0,
+                        segmentProgress: 0,
+                        secondsPerStack
+                    };
+                }
+                const safeDuration = Math.max(0.001, totalDuration || resolveCaptureLineupDurationSeconds(config, entries.length));
+                const clampedElapsed = clampPreviewValue(elapsedSeconds, 0, safeDuration);
+                const maxIndex = entries.length - 1;
+                const firstEntry = entries[0];
+                const lastEntry = entries[maxIndex];
+                const halfSpacing = spacing * 0.5;
+                const cameraX = entries.length === 1
+                    ? firstEntry.stackX
+                    : THREE.MathUtils.lerp(firstEntry.stackX - halfSpacing, lastEntry.stackX + halfSpacing, clampedElapsed / safeDuration);
+                let focusIndex = 0;
+                let smallestDistance = Number.POSITIVE_INFINITY;
+                entries.forEach((entry, index) => {
+                    const distance = Math.abs(cameraX - entry.stackX);
+                    if (distance < smallestDistance) {
+                        smallestDistance = distance;
+                        focusIndex = index;
+                    }
+                });
+                const focusEntry = entries[focusIndex] || firstEntry;
+                const segmentStart = focusIndex * secondsPerStack;
+                const segmentElapsed = clampPreviewValue(clampedElapsed - segmentStart, 0, secondsPerStack);
+                const segmentProgress = clampPreviewValue(segmentElapsed / secondsPerStack, 0, 1);
+                return {
+                    index: focusIndex,
+                    stackId: focusEntry.id,
+                    stackName: focusEntry.name,
+                    stackX: focusEntry.stackX,
+                    cameraX,
+                    segmentProgress,
+                    secondsPerStack
+                };
+            }
+
+            buildCaptureStage(config) {
+                if (!this.captureStageGroup) return;
+                this.clearCaptureStage();
+                this.captureStageGroup.visible = config.stageMode !== 'none';
+                if (config.stageMode === 'none') return;
+                const spacing = Math.max(1, config.stageSpacing);
+                const count = Math.max(3, config.stageCount);
+                const halfCount = Math.floor(count * 0.5);
+                if (config.stageMode === 'cube_lane_5u' || config.stageMode === 'distance_ticks_5u') {
+                    const material = new THREE.MeshStandardMaterial({ color: config.stageMode === 'cube_lane_5u' ? 0x60a5fa : 0x22d3ee, metalness: 0.05, roughness: 0.8, transparent: true, opacity: 0.7 });
+                    const cubeSize = spacing;
+                    const tickWidth = Math.max(0.18, spacing * 0.036);
+                    const tickHeight = Math.max(1.4, spacing * 0.28);
+                    const geometry = new THREE.BoxGeometry(
+                        config.stageMode === 'cube_lane_5u' ? cubeSize : tickWidth,
+                        config.stageMode === 'cube_lane_5u' ? cubeSize : tickHeight,
+                        config.stageMode === 'cube_lane_5u' ? cubeSize : tickWidth
+                    );
+                    for (let index = -halfCount; index <= halfCount; index++) {
+                        const marker = new THREE.Mesh(geometry.clone(), material.clone());
+                        marker.position.set(
+                            index * spacing,
+                            config.stageMode === 'cube_lane_5u' ? (-(cubeSize * 0.5) - 0.35) : -0.35,
+                            0
+                        );
+                        this.captureStageGroup.add(marker);
+                    }
+                } else if (config.stageMode === 'bounds_box') {
+                    const box = new THREE.BoxGeometry(4, 4, 4);
+                    const wire = new THREE.WireframeGeometry(box);
+                    const lines = new THREE.LineSegments(wire, new THREE.LineBasicMaterial({ color: 0xf8fafc, transparent: true, opacity: 0.55 }));
+                    lines.position.set(0, 0.8, 0);
+                    this.captureStageGroup.add(lines);
+                }
+            }
+
+            applyCaptureLineupCamera(config, elapsedSeconds, totalDuration) {
+                const safeDuration = Math.max(0.001, totalDuration || config.durationSeconds || 1);
+                if (config.cameraMode === 'stage_scroll_x') {
+                    const focusState = this.computeCaptureLineupFocusState(config, elapsedSeconds, safeDuration);
+                    this.captureLineupFocus = focusState;
+                    const targetX = focusState.cameraX + (config.targetOffset?.[0] ?? 0);
+                    const targetY = config.targetOffset?.[1] ?? 0.7;
+                    const targetZ = config.targetOffset?.[2] ?? 0;
+                    const cameraDistance = clampPreviewValue(this.cameraDistance || this.currentSceneConfig?.cameraDistance || 6.8, 2.5, 40);
+                    const cameraHeight = Math.max(1.65, targetY + 1.35);
+                    const position = new THREE.Vector3(focusState.cameraX, cameraHeight, cameraDistance);
+                    const target = new THREE.Vector3(targetX, targetY, targetZ);
+                    this.setCameraFromPositionAndTarget(position, target);
+                    return;
+                }
+                const nextConfig = {
+                    ...config,
+                    stageScrollTravel: Math.max(1, config.travelDistance || config.stageScrollTravel || 1)
+                };
+                this.captureLineupFocus = this.computeCaptureLineupFocusState(nextConfig, elapsedSeconds, safeDuration);
+                this.applyCaptureCamera(nextConfig, elapsedSeconds, safeDuration, this.captureSnapshot);
+            }
+
+            stepCaptureLineup(delta, absoluteTime, cameraForward) {
+                const lineup = this.captureLineup;
+                if (!lineup?.config) return;
+                const duration = Math.max(0.001, resolveCaptureLineupDurationSeconds(lineup.config, lineup.entries?.length || 1));
+                const loop = this.currentSceneConfig?.loop !== false;
+                const activityMode = PREVIEW_CAPTURE_ACTIVITY_MODES.includes(lineup.config.activityMode) ? lineup.config.activityMode : 'all_together';
+                const cycle = loop ? Math.floor(Math.max(0, absoluteTime) / duration) : 0;
+                const localTime = loop ? ((absoluteTime % duration) + duration) % duration : clampPreviewValue(absoluteTime, 0, duration);
+                if (cycle !== this.captureLineupCycle) {
+                    this.captureLineupCycle = cycle;
+                    this.captureLineupControllers.forEach((controller) => {
+                        controller.started = false;
+                        controller.localTime = 0;
+                        controller.layer.reset();
+                    });
+                }
+                this.applyCaptureLineupCamera(lineup.config, localTime, duration);
+                this.captureLineupControllers.forEach((controller) => {
+                    const isFocused = controller.stackId === this.captureLineupFocus?.stackId;
+                    if (activityMode === 'all_together' || activityMode === 'hybrid_fade') {
+                        if (!controller.started) {
+                            controller.started = true;
+                            controller.localTime = 0;
+                            controller.layer.reset();
+                        }
+                        controller.localTime = localTime;
+                        controller.layer.step(delta, controller.localTime, cameraForward, {
+                            emitEnabled: true,
+                            alphaMultiplier: activityMode === 'hybrid_fade' ? (isFocused ? 1 : 0.32) : 1
+                        });
+                        return;
+                    }
+                    if (localTime + 1e-6 < controller.revealAt) return;
+                    if (!controller.started) {
+                        controller.started = true;
+                        controller.localTime = 0;
+                        controller.layer.reset();
+                    }
+                    controller.localTime += delta;
+                    const emitEnabled = controller.localTime <= controller.holdSeconds;
+                    const fadeT = controller.fadeSeconds > 0
+                        ? clampPreviewValue((controller.localTime - controller.holdSeconds) / controller.fadeSeconds, 0, 1)
+                        : (emitEnabled ? 0 : 1);
+                    controller.layer.step(delta, controller.localTime, cameraForward, {
+                        emitEnabled: emitEnabled && isFocused,
+                        alphaMultiplier: isFocused ? (emitEnabled ? 1 : (1 - fadeT)) : 0.12
+                    });
+                });
+            }
+
+            applyCaptureCamera(config, elapsedSeconds, totalDuration, snapshot) {
+                const safeDuration = Math.max(0.001, totalDuration || config.durationSeconds || 1);
+                const progress = clampPreviewValue(elapsedSeconds / safeDuration, 0, 1);
+                const target = new THREE.Vector3(...normalizePreviewArray(config.targetOffset, 3, [0, 0.6, 0]));
+                if (config.cameraMode === 'hold_current' && snapshot) {
+                    this.cameraDistance = snapshot.cameraDistance;
+                    this.cameraPitch = snapshot.cameraPitch;
+                    this.cameraYaw = snapshot.cameraYaw;
+                    this.applyCameraState();
+                    return;
+                }
+                if (config.cameraMode === 'hold_preset') {
+                    this.cameraDistance = this.currentSceneConfig.cameraDistance;
+                    this.cameraPitch = this.currentSceneConfig.cameraPitch;
+                    this.cameraYaw = this.currentSceneConfig.cameraYaw;
+                    this.applyCameraState();
+                    return;
+                }
+                if (config.cameraMode === 'orbit_yaw' || config.cameraMode === 'orbit_drift') {
+                    const angle = progress * Math.PI * 2 * config.orbitSpeed * safeDuration;
+                    const pitch = config.cameraMode === 'orbit_drift'
+                        ? config.orbitPitch + Math.sin(progress * Math.PI * 2) * config.orbitDriftAmount
+                        : config.orbitPitch;
+                    const pitchRad = THREE.MathUtils.degToRad(pitch);
+                    const position = new THREE.Vector3(
+                        Math.sin(angle) * Math.cos(pitchRad) * config.orbitRadius,
+                        Math.sin(pitchRad) * config.orbitRadius + 0.2,
+                        Math.cos(angle) * Math.cos(pitchRad) * config.orbitRadius
+                    );
+                    this.setCameraFromPositionAndTarget(position, target);
+                    return;
+                }
+                if (config.cameraMode === 'dolly_x' || config.cameraMode === 'stage_scroll_x') {
+                    const travel = config.cameraMode === 'stage_scroll_x' ? config.stageScrollTravel : config.dollyDistance;
+                    const x = THREE.MathUtils.lerp(-travel * 0.5, travel * 0.5, progress);
+                    const z = clampPreviewValue(this.cameraDistance || this.currentSceneConfig.cameraDistance || 6.8, 2.5, 40);
+                    const position = new THREE.Vector3(x, 2.8, z);
+                    const travelTarget = config.cameraMode === 'stage_scroll_x'
+                        ? new THREE.Vector3(
+                            x + (config.targetOffset?.[0] ?? 0),
+                            config.targetOffset?.[1] ?? target.y,
+                            config.targetOffset?.[2] ?? target.z
+                        )
+                        : target;
+                    this.setCameraFromPositionAndTarget(position, travelTarget);
+                    return;
+                }
+                if (config.cameraMode === 'dolly_z') {
+                    const z = THREE.MathUtils.lerp(this.currentSceneConfig.cameraDistance + config.dollyDistance * 0.5, Math.max(2.5, this.currentSceneConfig.cameraDistance - config.dollyDistance * 0.5), progress);
+                    this.setCameraFromPositionAndTarget(new THREE.Vector3(0, 2.4, z), target);
+                    return;
+                }
+                if (config.cameraMode === 'pedestal_y') {
+                    const y = THREE.MathUtils.lerp(1.4, 1.4 + config.pedestalHeight, progress);
+                    this.setCameraFromPositionAndTarget(new THREE.Vector3(0, y, this.currentSceneConfig.cameraDistance), target);
+                    return;
+                }
+                if (config.cameraMode === 'figure8') {
+                    const angle = progress * Math.PI * 2;
+                    const x = Math.sin(angle) * config.orbitRadius;
+                    const z = Math.sin(angle * 2) * config.orbitRadius * 0.45 + this.currentSceneConfig.cameraDistance;
+                    const y = 2.1 + Math.cos(angle) * 0.6;
+                    this.setCameraFromPositionAndTarget(new THREE.Vector3(x, y, z), target);
+                    return;
+                }
+                if (config.cameraMode === 'keyframed') {
+                    const keys = Array.isArray(config.keyframes) && config.keyframes.length ? config.keyframes : createDefaultPreviewCaptureConfig().keyframes;
+                    const nextKeys = normalizePreviewCaptureKeyframes(keys, createDefaultPreviewCaptureConfig().keyframes);
+                    let start = nextKeys[0];
+                    let end = nextKeys[nextKeys.length - 1];
+                    for (let index = 0; index < nextKeys.length - 1; index++) {
+                        if (progress >= nextKeys[index].time && progress <= nextKeys[index + 1].time) {
+                            start = nextKeys[index];
+                            end = nextKeys[index + 1];
+                            break;
+                        }
+                    }
+                    const localT = end.time <= start.time ? 0 : (progress - start.time) / (end.time - start.time);
+                    const position = new THREE.Vector3(
+                        THREE.MathUtils.lerp(start.position[0], end.position[0], localT),
+                        THREE.MathUtils.lerp(start.position[1], end.position[1], localT),
+                        THREE.MathUtils.lerp(start.position[2], end.position[2], localT)
+                    );
+                    const nextTarget = new THREE.Vector3(
+                        THREE.MathUtils.lerp(start.target[0], end.target[0], localT),
+                        THREE.MathUtils.lerp(start.target[1], end.target[1], localT),
+                        THREE.MathUtils.lerp(start.target[2], end.target[2], localT)
+                    );
+                    this.setCameraFromPositionAndTarget(position, nextTarget);
+                    return;
+                }
+                this.applyCameraState();
+            }
+
+            beginDeterministicCapture(captureConfig = {}) {
+                if (!this.renderer || !this.scene || !this.camera || !this.currentPreset) {
+                    throw new Error('Preview runtime is not ready for capture.');
+                }
+                const isLineup = !!this.captureLineup?.config;
+                const config = isLineup
+                    ? {
+                        ...normalizeCaptureLineupConfig(captureConfig, this.captureLineup?.config?.setName || 'Texture Set', this.currentPreset.name),
+                        durationSeconds: resolveCaptureLineupDurationSeconds(captureConfig, this.captureLineup?.entries?.length || 1)
+                    }
+                    : normalizePreviewCaptureConfig(captureConfig, this.currentPreset.name);
+                const snapshot = this.createSimulationSnapshot();
+                this.captureSnapshot = snapshot;
+                this.captureInProgress = true;
+                this.ensureCaptureRenderer(config.width, config.height);
+                const stageCount = isLineup
+                    ? Math.max(3, Math.ceil((Math.max(config.travelDistance || config.stageScrollTravel, config.stageSpacing * Math.max(1, this.captureLineup?.entries?.length || 1)) / Math.max(1, config.stageSpacing))) + 4)
+                    : config.stageCount;
+                this.buildCaptureStage({ ...config, stageCount });
+                if (this.gridHelper) {
+                    this.gridHelper.visible = config.stageMode === 'grid_floor' || this.currentSceneConfig.grid;
+                }
+                if (config.simulationStartMode === 'continue_live') {
+                    this.needsWarmup = false;
+                } else if (config.simulationStartMode === 'reset_no_warmup') {
+                    this.resetSimulation();
+                    this.needsWarmup = false;
+                } else {
+                    this.resetSimulation();
+                    this.needsWarmup = false;
+                    this.warmupForSeconds(config.warmupSeconds);
+                }
+                return {
+                    totalFrames: Math.max(1, Math.round(config.durationSeconds * config.fps)),
+                    frameDelta: 1 / Math.max(1, config.fps),
+                    config,
+                    snapshot,
+                    mode: isLineup ? 'capture_lineup' : 'preview'
+                };
+            }
+
+            async captureDeterministicFrame(session, frameIndex) {
+                if (!session?.config) throw new Error('Capture session is invalid.');
+                if (frameIndex > 0) {
+                    this.clock += session.frameDelta;
+                    this.stepSimulation(session.frameDelta, this.clock);
+                }
+                const elapsedSeconds = frameIndex / Math.max(1, session.config.fps);
+                if (session.mode === 'capture_lineup') {
+                    this.applyCaptureLineupCamera(session.config, elapsedSeconds, session.config.durationSeconds);
+                } else {
+                    this.applyCaptureCamera(session.config, elapsedSeconds, session.config.durationSeconds, session.snapshot);
+                }
+                this.renderScene(this.captureRenderer, this.camera);
+                const blob = await new Promise((resolve, reject) => {
+                    this.captureCanvas.toBlob((result) => {
+                        if (!result) reject(new Error('Failed to encode preview frame.'));
+                        else resolve(result);
+                    }, 'image/jpeg', 0.92);
+                });
+                return {
+                    blob,
+                    frameIndex,
+                    totalFrames: session.totalFrames,
+                    elapsedSeconds
+                };
+            }
+
+            async finishDeterministicCapture(session, { restore = true } = {}) {
+                if (this.captureStageGroup) {
+                    this.captureStageGroup.visible = false;
+                    this.clearCaptureStage();
+                }
+                if (restore && this.captureSnapshot) {
+                    this.restoreSimulationSnapshot(this.captureSnapshot);
+                }
+                this.captureInProgress = false;
+                if (this.gridHelper && this.currentSceneConfig) this.gridHelper.visible = this.currentSceneConfig.grid;
+                if (this.canvas) {
+                    this.resize(this.canvas.clientWidth || this.canvas.width || 1, this.canvas.clientHeight || this.canvas.height || 1);
+                }
+                this.captureSnapshot = null;
+                this.applyCameraState();
+                this.renderScene(this.renderer, this.camera);
             }
 
             applyCameraState() {
@@ -2340,9 +3271,18 @@
                     (Array.isArray(this.gridHelper.material) ? this.gridHelper.material : [this.gridHelper.material]).forEach((material) => material.dispose());
                     this.gridHelper = null;
                 }
+                this.clearCaptureStage();
+                if (this.captureStageGroup) {
+                    this.scene?.remove(this.captureStageGroup);
+                    this.captureStageGroup = null;
+                }
+                this.disposeCaptureLineupTextures();
                 if (this.sourceTexture) this.sourceTexture.dispose();
                 if (this.fallbackTexture) this.fallbackTexture.dispose();
+                if (this.renderer?.forceContextLoss) this.renderer.forceContextLoss();
                 if (this.renderer) this.renderer.dispose();
+                this.captureRenderer = null;
+                this.captureCanvas = null;
                 this.renderer = null;
                 this.scene = null;
                 this.camera = null;

@@ -24,7 +24,10 @@ export const TOOLKIT_CATALOG = [
       { id: 'full_app', execution_mode: 'external_operator', description: 'Capture the full app surface in Browser View.', args: { label: 'string?', full_page: 'boolean?' } },
       { id: 'viewport', execution_mode: 'external_operator', description: 'Capture the current viewport in Browser View.', args: { label: 'string?' } },
       { id: 'element', execution_mode: 'external_operator', description: 'Capture a specific element in Browser View.', args: { selector: 'string', label: 'string?' } },
-      { id: 'latest', execution_mode: 'server_local', description: 'Return the latest recorded toolkit run payload.', args: {} }
+      { id: 'latest', execution_mode: 'server_local', description: 'Return the latest recorded toolkit run payload.', args: {} },
+      { id: 'render_set_video', execution_mode: 'hybrid', description: 'Run a deterministic set-lineup MP4 render through the local capture video job flow.', args: { set_name: 'string?', preset_name: 'string?', output_name: 'string?', duration_seconds: 'number?', fps: 'number?' } },
+      { id: 'video_status', execution_mode: 'server_local', description: 'Return the current status for a capture MP4 render job.', args: { job_id: 'string' } },
+      { id: 'review_saved_video', execution_mode: 'server_local', description: 'Extract review frames from a saved capture MP4 and summarize the review payload.', args: { output_path: 'string', frame_count: 'number?' } }
     ]
   },
   {
@@ -55,7 +58,10 @@ export const TOOLKIT_CATALOG = [
       { id: 'select_source', execution_mode: 'external_operator', description: 'Select a source texture in PREVIEW.', args: { source_id: 'string?', source_name: 'string?' } },
       { id: 'select_preset', execution_mode: 'external_operator', description: 'Select a preset in PREVIEW.', args: { preset_name: 'string' } },
       { id: 'apply_control_set', execution_mode: 'external_operator', description: 'Apply a grouped control patch in PREVIEW.', args: { patch: 'object' } },
-      { id: 'run_validation_pass', execution_mode: 'hybrid', description: 'Record a validation pass and provide Browser View instructions.', args: { pass_name: 'string?' } }
+      { id: 'run_validation_pass', execution_mode: 'hybrid', description: 'Record a validation pass and provide Browser View instructions.', args: { pass_name: 'string?' } },
+      { id: 'render_video', execution_mode: 'hybrid', description: 'Run a deterministic preview MP4 render through the local toolkit video job flow.', args: { preset_name: 'string?', output_name: 'string?', duration_seconds: 'number?', fps: 'number?' } },
+      { id: 'video_status', execution_mode: 'server_local', description: 'Return the current status for a preview MP4 render job.', args: { job_id: 'string' } },
+      { id: 'cancel_video', execution_mode: 'server_local', description: 'Cancel an in-flight preview MP4 render job.', args: { job_id: 'string' } }
     ]
   },
   {
