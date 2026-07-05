@@ -1241,8 +1241,8 @@ Clipboard copy
             if (!previewVM.supported) return <PreviewUnsupportedState />;
             return (
                 <div className="h-full bg-[#111]">
-                    <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[240px,minmax(360px,1fr),minmax(320px,auto)] xl:grid-cols-[280px,minmax(480px,1fr),420px] xl:grid-rows-1">
-                        <div className="order-2 min-h-[220px] xl:order-1 xl:min-h-0">
+                    <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[240px,minmax(360px,1fr),minmax(320px,auto)] xl:[grid-template-columns:clamp(220px,18vw,280px)_minmax(0,1fr)_clamp(300px,24vw,380px)] xl:grid-rows-1">
+                        <div className="order-2 min-h-[220px] min-w-0 xl:order-1 xl:min-h-0">
                             <PreviewUnityHierarchyPane previewVM={previewVM} />
                         </div>
                         <div className="order-1 flex min-h-[360px] min-w-0 flex-col border-b border-gray-800 bg-[#111] xl:order-2 xl:border-b-0">
@@ -1253,7 +1253,7 @@ Clipboard copy
                                 {viewPanelOpen ? <PreviewUnityViewPanel previewVM={previewVM} onClose={() => setViewPanelOpen(false)} /> : null}
                             </div>
                         </div>
-                        <div className="order-3 min-h-[320px] border-t border-gray-800 xl:min-h-0 xl:border-l xl:border-t-0">
+                        <div className="order-3 min-h-[320px] min-w-0 overflow-hidden border-t border-gray-800 xl:min-h-0 xl:border-l xl:border-t-0">
                             <PreviewUnityInspector previewVM={previewVM} />
                         </div>
                     </div>
@@ -1928,23 +1928,56 @@ Clipboard copy
             );
         }
 
+        const PREVIEW_TIME_SCALE_OPTIONS = Array.from({ length: 21 }, (_, index) => Number((index * 0.1).toFixed(1)));
+
+        function PreviewToolbarIconButton({ label, active = false, disabled = false, className = '', onClick, children }) {
+            return (
+                <button
+                    type="button"
+                    aria-label={label}
+                    title={label}
+                    disabled={disabled}
+                    onClick={onClick}
+                    className={`inline-flex h-9 w-9 items-center justify-center border text-[16px] leading-none transition-colors disabled:opacity-40 ${active ? 'border-blue-500 bg-blue-600 text-white' : 'border-gray-700 bg-[#2f2f2f] text-gray-200 hover:border-gray-500'} ${className}`}
+                >
+                    {children}
+                </button>
+            );
+        }
+
         function PreviewUnityToolbar({ previewVM, viewPanelOpen, onToggleViewPanel, recordPanelOpen, onToggleRecordPanel }) {
             const invalidPreset = previewVM.status === 'invalid_preset';
-            const usingFallbackSprite = !previewVM.activeSourceItem;
+            const runtimeStatus = String(previewVM.status || 'idle').replace(/_/g, ' ');
+            const runtimeLabel = previewVM.status === 'running_fallback_sprite'
+                ? 'fallback'
+                : (previewVM.status === 'invalid_preset'
+                    ? 'invalid'
+                    : (previewVM.status === 'error'
+                        ? 'error'
+                        : (previewVM.status === 'running'
+                            ? 'running'
+                            : runtimeStatus)));
+            const runtimeTone = previewVM.status === 'error'
+                ? 'border-red-900 bg-[#2a1515] text-red-200'
+                : (previewVM.status === 'invalid_preset'
+                    ? 'border-amber-700 bg-[#2a2312] text-amber-200'
+                    : (previewVM.status === 'running_fallback_sprite'
+                        ? 'border-amber-700 bg-[#2a2312] text-amber-200'
+                        : 'border-blue-500 bg-[#182033] text-blue-200'));
             const exporting = previewVM.exportState?.exporting === true;
             return (
                 <div className="flex flex-wrap items-center gap-2 border-b border-gray-800 bg-[#151515] px-3 py-3">
-                    <div className="flex min-w-[240px] flex-1 flex-wrap items-center gap-3">
-                        <UnityPreviewSelect value={previewVM.activeSourceId || ''} onChange={(e) => previewVM.selectSource(e.target.value || null)} className="max-w-[260px]">
+                    <div className="flex min-w-0 flex-[999_1_420px] flex-wrap items-center gap-2">
+                        <UnityPreviewSelect value={previewVM.activeSourceId || ''} onChange={(e) => previewVM.selectSource(e.target.value || null)} className="min-w-0 flex-[1_1_220px]" style={{ width: 'clamp(160px, 22vw, 220px)' }}>
                             <option value="">Fallback square (50% alpha)</option>
                             {previewVM.sourceItems.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                         </UnityPreviewSelect>
-                        <UnityPreviewSelect value={previewVM.activePresetId || ''} onChange={(e) => previewVM.selectPreset(e.target.value)} className="max-w-[220px]">
+                        <UnityPreviewSelect value={previewVM.activePresetId || ''} onChange={(e) => previewVM.selectPreset(e.target.value)} className="min-w-0 flex-[1_1_190px]" style={{ width: 'clamp(150px, 18vw, 190px)' }}>
                             {previewVM.presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
                         </UnityPreviewSelect>
                         <UnityPreviewMenu
                             label="Preset"
-                            triggerClassName="border border-gray-700 bg-[#252525] px-3 py-2 text-[11px] font-semibold text-gray-200"
+                            triggerClassName="h-9 border border-gray-700 bg-[#252525] px-3 text-[11px] font-semibold text-gray-200"
                             actions={[
                                 { label: 'New Preset', onClick: () => previewVM.createPreset() },
                                 { label: 'Duplicate Preset', onClick: () => previewVM.duplicatePreset() },
@@ -1957,23 +1990,38 @@ Clipboard copy
                             ]}
                         />
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                        <button onClick={() => previewVM.setPlaying(!previewVM.isPlaying)} disabled={invalidPreset} className={`border px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] ${previewVM.isPlaying ? 'border-blue-500 bg-blue-600 text-white' : 'border-gray-700 bg-[#2f2f2f] text-gray-200'} disabled:opacity-40`}>
+                    <div className="flex flex-[1_1_340px] flex-wrap items-center justify-end gap-2">
+                        <button type="button" onClick={() => previewVM.setPlaying(!previewVM.isPlaying)} disabled={invalidPreset} className={`h-9 shrink-0 border px-3 text-[10px] font-bold uppercase tracking-[0.16em] ${previewVM.isPlaying ? 'border-blue-500 bg-blue-600 text-white' : 'border-gray-700 bg-[#2f2f2f] text-gray-200'} disabled:opacity-40`}>
                             {previewVM.isPlaying ? 'Pause' : 'Play'}
                         </button>
-                        <button onClick={() => previewVM.resetSimulation()} disabled={invalidPreset} className="border border-gray-700 bg-[#2f2f2f] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-gray-200 disabled:opacity-40">Reset Sim</button>
-                        <button onClick={onToggleRecordPanel} className={`border px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] ${recordPanelOpen ? 'border-blue-500 bg-blue-600 text-white' : 'border-gray-700 bg-[#2f2f2f] text-gray-200'}`}>{exporting ? 'Recording' : 'Record'}</button>
-                        <button onClick={onToggleViewPanel} className={`border px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] ${viewPanelOpen ? 'border-blue-500 bg-blue-600 text-white' : 'border-gray-700 bg-[#2f2f2f] text-gray-200'}`}>View</button>
-                        <div className={`border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${usingFallbackSprite ? 'border-gray-700 bg-[#252525] text-gray-200' : 'border-blue-500 bg-[#182033] text-blue-200'}`}>
-                            {usingFallbackSprite ? 'Fallback' : 'Source'}
-                        </div>
-                        <div className="border border-gray-700 bg-[#252525] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-gray-200">
-                            {previewVM.status.replace(/_/g, ' ')}
-                        </div>
-                        <div className="flex min-w-[180px] items-center gap-2 border border-gray-700 bg-[#252525] px-3 py-2">
-                            <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">Time</span>
-                            <input type="range" min="0" max="3" step="0.01" value={previewVM.timeScale} onChange={(e) => previewVM.setTimeScale(parseFloat(e.target.value))} className="slider-thumb w-full" />
-                            <span className="w-8 text-right font-mono text-[10px] text-gray-200">{previewVM.timeScale.toFixed(2)}</span>
+                        <PreviewToolbarIconButton label="Reset simulation" disabled={invalidPreset} onClick={() => previewVM.resetSimulation()} className="w-9 rounded-full">
+                            ↻
+                        </PreviewToolbarIconButton>
+                        <PreviewToolbarIconButton label="Open view controls" active={viewPanelOpen} onClick={onToggleViewPanel}>
+                            👁
+                        </PreviewToolbarIconButton>
+                        <PreviewToolbarIconButton label={exporting ? 'Recording in progress' : 'Open record panel'} active={recordPanelOpen || exporting} onClick={onToggleRecordPanel} className={exporting ? 'border-red-500 bg-red-600 text-white hover:border-red-400' : ''}>
+                            ⏺
+                        </PreviewToolbarIconButton>
+                        <UnityPreviewSelect
+                            value={String(Math.round(previewVM.timeScale * 10) / 10)}
+                            onChange={(e) => previewVM.setTimeScale(parseFloat(e.target.value))}
+                            className="shrink-0"
+                            style={{ width: 'clamp(82px, 8vw, 96px)' }}
+                            aria-label="Simulation speed"
+                            title="Simulation speed"
+                        >
+                            {PREVIEW_TIME_SCALE_OPTIONS.map((value) => (
+                                <option key={value} value={String(value)}>
+                                    {`x${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1).replace(/0$/, '')}`}
+                                </option>
+                            ))}
+                        </UnityPreviewSelect>
+                        <div
+                            className={`border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${runtimeTone}`}
+                            title={`Status: ${runtimeStatus}${previewVM.activeSourceItem ? ` | Source: ${previewVM.activeSourceItem.name}` : ' | Source: fallback square'}`}
+                        >
+                            {runtimeLabel}
                         </div>
                     </div>
                 </div>
@@ -2131,6 +2179,10 @@ Clipboard copy
                             <UnityPreviewField label="Distance"><UnityPreviewInput type="number" value={scene.cameraDistance} onChange={(e) => previewVM.updateSceneField('cameraDistance', parseFloat(e.target.value || 6))} /></UnityPreviewField>
                             <UnityPreviewField label="Pitch"><UnityPreviewInput type="number" value={scene.cameraPitch} onChange={(e) => previewVM.updateSceneField('cameraPitch', parseFloat(e.target.value || 18))} /></UnityPreviewField>
                             <UnityPreviewField label="Yaw"><UnityPreviewInput type="number" value={scene.cameraYaw} onChange={(e) => previewVM.updateSceneField('cameraYaw', parseFloat(e.target.value || 24))} /></UnityPreviewField>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <UnityPreviewField label="Invert Mouse X"><UnityPreviewToggle value={scene.invertMouseX !== false} onChange={(value) => previewVM.updateSceneField('invertMouseX', value)} /></UnityPreviewField>
+                            <UnityPreviewField label="Invert Mouse Y"><UnityPreviewToggle value={scene.invertMouseY !== false} onChange={(value) => previewVM.updateSceneField('invertMouseY', value)} /></UnityPreviewField>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <UnityPreviewField label="Grid"><UnityPreviewToggle value={scene.grid !== false} onChange={(value) => previewVM.updateSceneField('grid', value)} /></UnityPreviewField>

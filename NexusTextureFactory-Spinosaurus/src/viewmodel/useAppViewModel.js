@@ -373,7 +373,7 @@
                             if (typeof parsed.activePresetId === 'string') setPreviewActivePresetId(parsed.activePresetId);
                             if (typeof parsed.selectedLayerId === 'string') setPreviewSelectedLayerId(parsed.selectedLayerId);
                             if (typeof parsed.isPlaying === 'boolean') setPreviewIsPlaying(parsed.isPlaying);
-                            if (Number.isFinite(parsed.timeScale)) setPreviewTimeScale(clampPreviewValue(parsed.timeScale, 0, 3));
+                            if (Number.isFinite(parsed.timeScale)) setPreviewTimeScale(clampPreviewValue(Math.round(parsed.timeScale * 10) / 10, 0, 2));
                             if (parsed.expandedModules && typeof parsed.expandedModules === 'object') setPreviewExpandedModules(parsed.expandedModules);
                             if (parsed.advancedPanels && typeof parsed.advancedPanels === 'object') setPreviewAdvancedPanels(parsed.advancedPanels);
                         }
@@ -2635,7 +2635,11 @@
                         if (previewRuntimeRef.current) previewRuntimeRef.current.resetSimulation();
                     },
                     setPlaying: (value) => setPreviewIsPlaying(!!value),
-                    setTimeScale: (value) => setPreviewTimeScale(clampPreviewValue(Number(value) || 0, 0, 3)),
+                    setTimeScale: (value) => {
+                        const numeric = Number(value);
+                        const snapped = Number.isFinite(numeric) ? Math.round(numeric * 10) / 10 : 0;
+                        setPreviewTimeScale(clampPreviewValue(snapped, 0, 2));
+                    },
                     checkToolkitHealth: async () => await refreshToolkitHealth(),
                     startVideoExport: async () => {
                         try {

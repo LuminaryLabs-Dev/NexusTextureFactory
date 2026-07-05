@@ -27,6 +27,12 @@
         const PREVIEW_DEFAULT_SOURCE_MODE = 'fallback_square_50';
         const PREVIEW_FALLBACK_ALPHA = 0.5;
         const PREVIEW_CAMERA_TARGET = new THREE.Vector3(0, 0.6, 0);
+        const PREVIEW_GRID_Y = 0;
+        const PREVIEW_GRID_SIZE = 160;
+        const PREVIEW_GRID_MAJOR_STEP = 5;
+        const PREVIEW_GRID_MINOR_STEP = 1;
+        const PREVIEW_GRID_FADE_INNER_MULTIPLIER = 4;
+        const PREVIEW_GRID_FADE_OUTER_MULTIPLIER = 10;
 
         const createPreviewLayerId = (index = 0) => `layer-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
         const createPreviewPresetId = () => `preset-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -944,6 +950,8 @@
                     cameraDistance: 6.8,
                     cameraPitch: 24,
                     cameraYaw: 32,
+                    invertMouseX: true,
+                    invertMouseY: true,
                     grid: true,
                     timeScale: 1,
                     loop: true,
@@ -1259,6 +1267,8 @@
                     cameraDistance: clampPreviewValue(isFiniteNumber(scene.cameraDistance) ? scene.cameraDistance : base.scene.cameraDistance, 2, 24),
                     cameraPitch: clampPreviewValue(isFiniteNumber(scene.cameraPitch) ? scene.cameraPitch : base.scene.cameraPitch, 0, 89),
                     cameraYaw: isFiniteNumber(scene.cameraYaw) ? scene.cameraYaw : base.scene.cameraYaw,
+                    invertMouseX: typeof scene.invertMouseX === 'boolean' ? scene.invertMouseX : base.scene.invertMouseX,
+                    invertMouseY: typeof scene.invertMouseY === 'boolean' ? scene.invertMouseY : base.scene.invertMouseY,
                     grid: typeof scene.grid === 'boolean' ? scene.grid : base.scene.grid,
                     timeScale: clampPreviewValue(isFiniteNumber(scene.timeScale) ? scene.timeScale : base.scene.timeScale, 0, 3),
                     loop: typeof scene.loop === 'boolean' ? scene.loop : base.scene.loop,
@@ -2348,8 +2358,8 @@
                     secondsPerStack: 0
                 };
                 this.fallbackTexture = null;
-                this.gridHelper = null;
-                this.floorMesh = null;
+                this.previewGridMesh = null;
+                this.captureFloorMesh = null;
                 this.captureRenderer = null;
                 this.captureCanvas = null;
                 this.captureStageGroup = null;
@@ -2384,20 +2394,8 @@
                 this.scene = new THREE.Scene();
                 this.camera = new THREE.PerspectiveCamera(44, 1, 0.01, 100);
 
-                const floorGeometry = new THREE.PlaneGeometry(24, 24);
-                const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x0b1020, metalness: 0.02, roughness: 0.95, transparent: true, opacity: 0.45 });
-                this.floorMesh = new THREE.Mesh(floorGeometry, floorMaterial);
-                this.floorMesh.rotation.x = -Math.PI * 0.5;
-                this.floorMesh.position.y = -1.15;
-                this.scene.add(this.floorMesh);
-
-                this.gridHelper = new THREE.GridHelper(18, 24, 0x3a6a8a, 0x193148);
-                this.gridHelper.position.y = -1.14;
-                (Array.isArray(this.gridHelper.material) ? this.gridHelper.material : [this.gridHelper.material]).forEach((material) => {
-                    material.transparent = true;
-                    material.opacity = 0.45;
-                });
-                this.scene.add(this.gridHelper);
+                this.previewGridMesh = this.createPreviewGridMesh();
+                this.scene.add(this.previewGridMesh);
 
                 this.captureStageGroup = new THREE.Group();
                 this.captureStageGroup.visible = false;
@@ -2413,6 +2411,88 @@
                 this.bindCameraControls();
                 this.mounted = true;
                 this.applyCameraState();
+            }
+
+            createPreviewGridMesh() {
+                const geometry = new THREE.PlaneGeometry(PREVIEW_GRID_SIZE, PREVIEW_GRID_SIZE, 1, 1);
+                const material = new THREE.ShaderMaterial({
+                    transparent: true,
+                    depthWrite: false,
+                    side: THREE.DoubleSide,
+                    uniforms: {
+                        uCenter: { value: new THREE.Vector2(0, 0) },
+                        uInnerRadius: { value: 16 },
+                        uOuterRadius: { value: 48 },
+                        uMajorStep: { value: PREVIEW_GRID_MAJOR_STEP },
+                        uMinorStep: { value: PREVIEW_GRID_MINOR_STEP },
+                        uMajorColor: { value: new THREE.Color(0x2c5371) },
+                        uMinorColor: { value: new THREE.Color(0x193148) }
+                    },
+                    vertexShader: `
+                        varying vec3 vWorldPosition;
+                        void main() {
+                            vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                            vWorldPosition = worldPosition.xyz;
+                            gl_Position = projectionMatrix * viewMatrix * worldPosition;
+                        }
+                    `,
+                    fragmentShader: `
+                        precision highp float;
+                        uniform vec2 uCenter;
+                        uniform float uInnerRadius;
+                        uniform float uOuterRadius;
+                        uniform float uMajorStep;
+                        uniform float uMinorStep;
+                        uniform vec3 uMajorColor;
+                        uniform vec3 uMinorColor;
+                        varying vec3 vWorldPosition;
+
+                        float gridLine(vec2 coord, float stepSize) {
+                            vec2 scaled = coord / stepSize;
+                            vec2 cell = abs(fract(scaled - 0.5) - 0.5) / max(fwidth(scaled), vec2(0.0001));
+                            float line = min(cell.x, cell.y);
+                            return 1.0 - clamp(line, 0.0, 1.0);
+                        }
+
+                        void main() {
+                            vec2 coord = vWorldPosition.xz;
+                            float minor = gridLine(coord, uMinorStep);
+                            float major = gridLine(coord, uMajorStep);
+                            float dist = distance(coord, uCenter);
+                            float fade = 1.0 - smoothstep(uInnerRadius, uOuterRadius, dist);
+                            float alpha = max(minor * 0.18, major * 0.55) * fade;
+                            if (alpha <= 0.001) discard;
+                            vec3 color = mix(uMinorColor, uMajorColor, clamp(major, 0.0, 1.0));
+                            gl_FragColor = vec4(color, alpha);
+                        }
+                    `
+                });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.rotation.x = -Math.PI * 0.5;
+                mesh.position.y = PREVIEW_GRID_Y;
+                mesh.renderOrder = -10;
+                return mesh;
+            }
+
+            updatePreviewGrid() {
+                if (!this.previewGridMesh || !this.camera) return;
+                const fadeDistance = clampPreviewValue(this.cameraDistance || this.currentSceneConfig?.cameraDistance || 6.8, 2.5, 40);
+                const centerX = this.camera.position.x;
+                const centerZ = this.camera.position.z;
+                this.previewGridMesh.position.set(centerX, PREVIEW_GRID_Y, centerZ);
+                this.previewGridMesh.material.uniforms.uCenter.value.set(centerX, centerZ);
+                this.previewGridMesh.material.uniforms.uInnerRadius.value = Math.max(8, fadeDistance * PREVIEW_GRID_FADE_INNER_MULTIPLIER);
+                this.previewGridMesh.material.uniforms.uOuterRadius.value = Math.max(18, fadeDistance * PREVIEW_GRID_FADE_OUTER_MULTIPLIER);
+            }
+
+            updateGroundMode() {
+                const inCaptureMode = !!this.captureLineup?.config || this.captureInProgress;
+                if (this.previewGridMesh) {
+                    this.previewGridMesh.visible = !inCaptureMode && this.currentSceneConfig?.grid !== false;
+                }
+                if (this.captureFloorMesh) {
+                    this.captureFloorMesh.visible = !!this.captureStageGroup?.visible;
+                }
             }
 
             bindCameraControls() {
@@ -2434,8 +2514,10 @@
                     const deltaY = event.clientY - this.lastPointerY;
                     this.lastPointerX = event.clientX;
                     this.lastPointerY = event.clientY;
-                    this.setCameraYaw(this.cameraYaw + deltaX * 0.28);
-                    this.setCameraPitch(this.cameraPitch - deltaY * 0.22);
+                    const invertMouseX = this.currentSceneConfig?.invertMouseX !== false;
+                    const invertMouseY = this.currentSceneConfig?.invertMouseY !== false;
+                    this.setCameraYaw(this.cameraYaw + deltaX * 0.28 * (invertMouseX ? -1 : 1));
+                    this.setCameraPitch(this.cameraPitch + deltaY * 0.22 * (invertMouseY ? 1 : -1));
                     event.preventDefault();
                 };
                 this.boundPointerUp = (event) => {
@@ -2520,13 +2602,6 @@
                 this.layers.forEach((layer) => layer.setSourceTexture(this.sourceTexture));
             }
 
-            updateFloorHeight() {
-                const collisionYs = this.layers.map((layer) => layer.compiled.collision.enabled ? layer.compiled.collision.planeY : null).filter((value) => isFiniteNumber(value));
-                const floorY = collisionYs.length ? Math.min(...collisionYs) : -1.15;
-                if (this.floorMesh) this.floorMesh.position.y = floorY;
-                if (this.gridHelper) this.gridHelper.position.y = floorY + 0.01;
-            }
-
             createSimulationSnapshot() {
                 return {
                     clock: this.clock,
@@ -2540,7 +2615,7 @@
                     cameraPitch: this.cameraPitch,
                     cameraYaw: this.cameraYaw,
                     sceneMode: this.captureLineup ? 'capture_lineup' : 'preview',
-                    gridVisible: this.gridHelper ? this.gridHelper.visible : false,
+                    gridVisible: this.previewGridMesh ? this.previewGridMesh.visible : false,
                     stageVisible: this.captureStageGroup ? this.captureStageGroup.visible : false,
                     captureLineupCycle: this.captureLineupCycle,
                     captureLineupControllers: this.captureLineupControllers.map((controller) => ({
@@ -2570,7 +2645,7 @@
                 this.cameraDistance = isFiniteNumber(snapshot.cameraDistance) ? snapshot.cameraDistance : this.cameraDistance;
                 this.cameraPitch = isFiniteNumber(snapshot.cameraPitch) ? snapshot.cameraPitch : this.cameraPitch;
                 this.cameraYaw = isFiniteNumber(snapshot.cameraYaw) ? snapshot.cameraYaw : this.cameraYaw;
-                if (this.gridHelper) this.gridHelper.visible = snapshot.gridVisible !== false;
+                if (this.previewGridMesh) this.previewGridMesh.visible = snapshot.gridVisible !== false;
                 if (this.captureStageGroup) this.captureStageGroup.visible = snapshot.stageVisible === true;
                 this.captureLineupCycle = Math.max(0, Math.round(snapshot.captureLineupCycle || 0));
                 const controllerState = new Map((snapshot.captureLineupControllers || []).map((entry) => [entry.layerId, entry]));
@@ -2586,6 +2661,7 @@
                 this.layers.forEach((layer) => layer.restoreSimulationSnapshot(byId.get(layer.compiled.id)));
                 this.captureLineupFocus = this.computeCaptureLineupFocusState(this.captureLineup?.config || {}, this.clock, this.captureLineup?.config?.durationSeconds || 0);
                 this.applyCameraState();
+                this.updateGroundMode();
             }
 
             setPreset(preset) {
@@ -2614,7 +2690,7 @@
                 this.camera.updateProjectionMatrix();
                 this.applyCameraState();
                 this.updateCanvasInteractionMode();
-                if (this.gridHelper) this.gridHelper.visible = this.currentSceneConfig.grid;
+                this.updateGroundMode();
                 this.layers = this.currentPreset.layers.map((layer) => new PreviewParticleLayer(this, layer, this.currentSceneConfig));
                 this.layerMap = new Map(this.layers.map((layer) => [layer.compiled.id, layer]));
                 this.layers.forEach((layer) => {
@@ -2622,7 +2698,6 @@
                     this.scene.add(layer.renderMesh);
                     this.scene.add(layer.trailMesh);
                 });
-                this.updateFloorHeight();
                 this.needsWarmup = true;
             }
 
@@ -2715,7 +2790,7 @@
                 this.cameraYaw = this.currentSceneConfig.cameraYaw;
                 const stageCount = Math.max(3, Math.ceil((Math.max(normalizedConfig.travelDistance, normalizedConfig.stackSpacing * Math.max(1, safeEntries.length)) / Math.max(1, normalizedConfig.stageSpacing))) + 4);
                 this.buildCaptureStage({ ...normalizedConfig, stageCount, stageLength: normalizedConfig.travelDistance });
-                if (this.gridHelper) this.gridHelper.visible = normalizedConfig.stageMode === 'grid_floor' || this.currentSceneConfig.grid;
+                this.updateGroundMode();
                 this.captureLineup.entries.forEach((entry, entryIndex) => {
                     const texture = this.createSourceTexture(safeEntries[entryIndex]?.image);
                     if (texture) this.captureLineupTextures.push(texture);
@@ -2745,6 +2820,7 @@
                 this.lastTickTime = null;
                 this.needsWarmup = false;
                 this.updateCanvasInteractionMode();
+                this.updateGroundMode();
                 this.applyCaptureLineupCamera(normalizedConfig, 0, normalizedConfig.durationSeconds);
                 this.renderScene(this.renderer, this.camera);
             }
@@ -2770,7 +2846,9 @@
             }
 
             setTimeScale(value) {
-                this.timeScale = clampPreviewValue(Number(value) || 1, 0, 3);
+                const numeric = Number(value);
+                const snapped = Number.isFinite(numeric) ? Math.round(numeric * 10) / 10 : 1;
+                this.timeScale = clampPreviewValue(snapped, 0, 2);
             }
 
             setCameraPitch(value) {
@@ -2904,6 +2982,7 @@
                     if (Array.isArray(child?.material)) child.material.forEach((entry) => entry?.dispose?.());
                     else child?.material?.dispose?.();
                 }
+                this.captureFloorMesh = null;
             }
 
             computeCaptureLineupFocusState(config, elapsedSeconds, totalDuration) {
@@ -2958,7 +3037,15 @@
                 if (!this.captureStageGroup) return;
                 this.clearCaptureStage();
                 this.captureStageGroup.visible = config.stageMode !== 'none';
+                this.captureFloorMesh = null;
                 if (config.stageMode === 'none') return;
+                const floorGeometry = new THREE.PlaneGeometry(Math.max(24, (config.stageLength || config.travelDistance || 60) + 20), Math.max(24, config.stageSpacing * Math.max(4, config.stageCount || 8)));
+                const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x0b1020, metalness: 0.02, roughness: 0.95, transparent: true, opacity: 0.55 });
+                this.captureFloorMesh = new THREE.Mesh(floorGeometry, floorMaterial);
+                this.captureFloorMesh.rotation.x = -Math.PI * 0.5;
+                this.captureFloorMesh.position.set(0, PREVIEW_GRID_Y, 0);
+                this.captureFloorMesh.renderOrder = -10;
+                this.captureStageGroup.add(this.captureFloorMesh);
                 const spacing = Math.max(1, config.stageSpacing);
                 const count = Math.max(3, config.stageCount);
                 const halfCount = Math.floor(count * 0.5);
@@ -3176,9 +3263,7 @@
                     ? Math.max(3, Math.ceil((Math.max(config.travelDistance || config.stageScrollTravel, config.stageSpacing * Math.max(1, this.captureLineup?.entries?.length || 1)) / Math.max(1, config.stageSpacing))) + 4)
                     : config.stageCount;
                 this.buildCaptureStage({ ...config, stageCount });
-                if (this.gridHelper) {
-                    this.gridHelper.visible = config.stageMode === 'grid_floor' || this.currentSceneConfig.grid;
-                }
+                this.updateGroundMode();
                 if (config.simulationStartMode === 'continue_live') {
                     this.needsWarmup = false;
                 } else if (config.simulationStartMode === 'reset_no_warmup') {
@@ -3234,7 +3319,7 @@
                     this.restoreSimulationSnapshot(this.captureSnapshot);
                 }
                 this.captureInProgress = false;
-                if (this.gridHelper && this.currentSceneConfig) this.gridHelper.visible = this.currentSceneConfig.grid;
+                this.updateGroundMode();
                 if (this.canvas) {
                     this.resize(this.canvas.clientWidth || this.canvas.width || 1, this.canvas.clientHeight || this.canvas.height || 1);
                 }
@@ -3254,22 +3339,17 @@
                     Math.cos(yaw) * Math.cos(pitch) * distance
                 );
                 this.camera.lookAt(PREVIEW_CAMERA_TARGET);
+                this.updatePreviewGrid();
             }
 
             dispose() {
                 this.unbindCameraControls();
                 this.clearLayers();
-                if (this.floorMesh) {
-                    this.scene?.remove(this.floorMesh);
-                    this.floorMesh.geometry.dispose();
-                    this.floorMesh.material.dispose();
-                    this.floorMesh = null;
-                }
-                if (this.gridHelper) {
-                    this.scene?.remove(this.gridHelper);
-                    this.gridHelper.geometry.dispose();
-                    (Array.isArray(this.gridHelper.material) ? this.gridHelper.material : [this.gridHelper.material]).forEach((material) => material.dispose());
-                    this.gridHelper = null;
+                if (this.previewGridMesh) {
+                    this.scene?.remove(this.previewGridMesh);
+                    this.previewGridMesh.geometry.dispose();
+                    this.previewGridMesh.material.dispose();
+                    this.previewGridMesh = null;
                 }
                 this.clearCaptureStage();
                 if (this.captureStageGroup) {
