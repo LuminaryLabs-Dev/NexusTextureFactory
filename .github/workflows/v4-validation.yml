@@ -1,0 +1,28 @@
+name: V4 Validation
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          for f in Core/*.mjs Kits/*.mjs Modules/*.mjs CLI/*.mjs MCP/*.mjs HTTP/*.mjs Tests/*.mjs; do
+            node --check "$f"
+          done
+      - name: V4 unit tests
+        run: npm test
+      - name: CLI smoke test
+        run: |
+          node CLI/cli.mjs list
+          node CLI/cli.mjs validate Presets/mana-mote.json
+          node CLI/cli.mjs render Presets/mana-mote.json /tmp/mana-mote.png
+          test -s /tmp/mana-mote.png
+          node -e "const b=require('fs').readFileSync('/tmp/mana-mote.png');if(b.subarray(1,4).toString()!=='PNG')process.exit(1)"
