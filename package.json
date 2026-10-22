@@ -1,0 +1,13 @@
+{
+  "name": "nexustexturefactory",
+  "version": "4.0.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test Tests/*.test.mjs",
+    "texture": "node CLI/cli.mjs",
+    "studio": "npm --prefix Studio run dev",
+    "http": "node HTTP/server.mjs",
+    "mcp": "node MCP/server.mjs"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "nexustexture.recipe/1",
+  "name": "Mana Mote",
+  "seed": 1842,
+  "canvas": {
+    "width": 128,
+    "height": 128
+  },
+  "nodes": [
+    {
+      "id": "circle",
+      "kit": "shape",
+      "params": {
+        "radius": 0.36
+      }
+    },
+    {
+      "id": "soft",
+      "kit": "gradient",
+      "params": {
+        "angle": 20
+      }
+    },
+    {
+      "id": "mote",
+      "kit": "blend",
+      "inputs": [
+        "circle",
+        "soft"
+      ],
+      "params": {
+        "mode": "multiply"
+      }
+    }
+  ],
+  "output": "mote"
+}

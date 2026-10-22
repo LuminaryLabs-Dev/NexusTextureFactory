@@ -1,0 +1,3 @@
+# V4 migration status
+
+Status: initial additive foundation. Existing Stegosaurus, Triceratops and Spinosaurus applications remain authoritative until full parity is tested. The 5 CPU operations are new proof-of-contract implementations, not copied equivalents of the 22 existing browser GPU algorithms. Graph validation, deterministic generation, PNG export, CLI, local HTTP and JSON-RPC MCP entrypoints are implemented. Full MCP interoperability, migration, renderer parity, saved sets and flipbook export are NOT yet certified. Do not delete the original folders until full local browser validation and baseline comparison are complete.

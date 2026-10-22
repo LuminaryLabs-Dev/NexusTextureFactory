@@ -1,0 +1,4 @@
+import {deflateSync} from "node:zlib";
+function crc32(b){let c=-1;for(const x of b){c^=x;for(let j=0;j<8;j++)c=(c>>>1)^((c&1)?0xedb88320:0);}return (c^-1)>>>0;}
+function chunk(tag,data){const name=Buffer.from(tag),len=Buffer.alloc(4),crc=Buffer.alloc(4);len.writeUInt32BE(data.length);crc.writeUInt32BE(crc32(Buffer.concat([name,data])));return Buffer.concat([len,name,data,crc]);}
+export function encodePng({width,height,alpha}){const rgba=Buffer.alloc(height*(1+width*4));for(let y=0;y<height;y++){const start=y*(1+width*4);for(let x=0;x<width;x++){const pos=start+1+x*4,v=Math.round(Math.min(1,Math.max(0,alpha[y*width+x]))*255);rgba[pos]=rgba[pos+1]=rgba[pos+2]=255;rgba[pos+3]=v;}}const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(width,0);ihdr.writeUInt32BE(height,4);ihdr[8]=8;ihdr[9]=6;return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk("IHDR",ihdr),chunk("IDAT",deflateSync(rgba)),chunk("IEND",Buffer.alloc(0))]);}
