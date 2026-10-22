@@ -1,0 +1,53 @@
+name: Deploy V4 Studio
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages-v4
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate V4 modules
+        run: |
+          for f in Core/*.mjs Kits/*.mjs Modules/*.mjs CLI/*.mjs MCP/*.mjs HTTP/*.mjs Tests/*.mjs; do
+            node --check "$f"
+          done
+          npm test
+      - name: Build unified Studio
+        run: node Studio/scripts/build.mjs
+      - name: Verify Pages artifact
+        run: |
+          test -s Studio/dist/index.html
+          test -s Studio/dist/src/model/core.js
+          test -s Studio/dist/src/view/App.js
+          test -s Studio/dist/src/view/components.js
+          test -s Studio/dist/src/viewmodel/useAppViewModel.js
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Studio
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: Studio/dist
+      - name: Deploy
+        uses: actions/deploy-pages@v4
+        id: deployment
