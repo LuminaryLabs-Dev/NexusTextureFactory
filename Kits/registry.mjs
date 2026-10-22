@@ -1,8 +1,10 @@
+import {extraOperations} from './extra.mjs';
 export const operations = Object.freeze({
   shape: {id:"shape", params:{radius:0.35}, apply:({w,h,params})=>{const a=new Float32Array(w*h);const r=Number(params.radius??0.35);for(let y=0;y<h;y++)for(let x=0;x<w;x++){const dx=(x+.5)/w-.5,dy=(y+.5)/h-.5;a[y*w+x]=Math.max(0,Math.min(1,(r-Math.hypot(dx,dy))*Math.min(w,h)));}return a;}},
   gradient:{id:"gradient",params:{angle:0},apply:({w,h,params})=>{const a=new Float32Array(w*h),t=Number(params.angle??0)*Math.PI/180;for(let y=0;y<h;y++)for(let x=0;x<w;x++)a[y*w+x]=Math.max(0,Math.min(1,.5+((x+.5)/w-.5)*Math.cos(t)+((y+.5)/h-.5)*Math.sin(t)));return a;}},
   noise:{id:"noise",params:{scale:12},apply:({w,h,params,seed})=>{const a=new Float32Array(w*h),s=Number(params.scale??12);const hash=(x,y)=>{let n=(Math.imul(x,374761393)^Math.imul(y,668265263)^Math.imul(seed|0,1442695041))|0;n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967295;};for(let y=0;y<h;y++)for(let x=0;x<w;x++){const px=(x+.5)/w*s,py=(y+.5)/h*s,ix=Math.floor(px),iy=Math.floor(py),u=px-ix,v=py-iy;const sx=u*u*(3-2*u),sy=v*v*(3-2*v);a[y*w+x]=(1-sy)*((1-sx)*hash(ix,iy)+sx*hash(ix+1,iy))+sy*((1-sx)*hash(ix,iy+1)+sx*hash(ix+1,iy+1));}return a;}},
   threshold:{id:"threshold",params:{cutoff:0.5},apply:({inputs,params})=>{const a=inputs[0];if(!a)throw Error("threshold requires input");const t=Number(params.cutoff??.5);return Float32Array.from(a,v=>v>=t?1:0);}},
   blend:{id:"blend",params:{mode:"multiply"},apply:({inputs,params})=>{const [a,b]=inputs;if(!a||!b||a.length!==b.length)throw Error("blend requires two equal inputs");const mode=params.mode??"multiply";const methods={add:(x,y)=>Math.min(1,x+y),subtract:(x,y)=>Math.max(0,x-y),multiply:(x,y)=>x*y,max:Math.max,min:Math.min,overwrite:(_x,y)=>y};if(!methods[mode])throw Error("Unknown blend mode: "+mode);return Float32Array.from(a,(v,i)=>methods[mode](v,b[i]));}}
+...extraOperations
 });
 export function listOperations(){return Object.values(operations).map(({id,params})=>({id,defaultParams:params}));}
