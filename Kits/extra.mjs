@@ -2,7 +2,7 @@
 const clamp=x=>Math.max(0,Math.min(1,x));
 const src=(inputs,w,h)=>{const a=inputs?.[0];if(!(a instanceof Float32Array)||a.length!==w*h)throw Error("Operation requires image input");return a;};
 const pixel=(a,w,h,x,y)=>a[Math.max(0,Math.min(h-1,y))*w+Math.max(0,Math.min(w-1,x))];
-const morphology=(w,h,a,r,mode)=>{r=Math.trunc(Number(r));if(!Number.isFinite(r)||r<0||r>16)throw Error("radius must be 0-16");const out=new Float32Array(w*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let v=mode==="erode"?1:0;for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r++){const s=pixel(a,w,h,x+dx,y+dy);v=mode==="erode"?Math.min(v,s):Math.max(v,s);}out[y*w+x]=v;}return out;};
+const morphology=(w,h,a,r,mode)=>{r=Math.trunc(Number(r));if(!Number.isFinite(r)||r<0||r>16)throw Error("radius must be 0-16");const out=new Float32Array(w*h);for(let y=0;y<h;y++){for(let x=0;x<w;x++){let v=mode==="erode"?1:0;for(let dy=-r;dy<=r;dy++){for(let dx=-r;dx<=r;dx++){const value=pixel(a,w,h,x+dx,y+dy);v=mode==="erode"?Math.min(v,value):Math.max(v,value);}}out[y*w+x]=v;}}return out;};
 export const extraOperations=Object.freeze({
  vignette:{id:"vignette",params:{radius:.4,softness:.15},apply:({w,h,params})=>{const a=new Float32Array(w*h),r=Number(params.radius),s=Math.max(.00001,Number(params.softness));for(let y=0;y<h;y++)for(let x=0;x<w;x++)a[y*w+x]=clamp((r-Math.hypot((x+.5)/w-.5,(y+.5)/h-.5))/s);return a;}},
  posterize:{id:"posterize",params:{levels:4},apply:({w,h,inputs,params})=>{const a=src(inputs,w,h),n=Math.trunc(Number(params.levels));if(!Number.isFinite(n)||n<2||n>256)throw Error("levels must be 2-256");return Float32Array.from(a,v=>Math.round(clamp(v)*(n-1))/(n-1));}},
