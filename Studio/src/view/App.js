@@ -1,5 +1,5 @@
-        const NavBar = ({ uiVM }) => (
-            <div className="h-12 bg-[#1a1a1a] flex items-center justify-center gap-8 border-b border-gray-800 shrink-0">
+        const NavBar = ({ uiVM, onProjects }) => (
+            <div className="h-12 bg-[#1a1a1a] flex items-center justify-center gap-6 border-b border-gray-800 shrink-0">\n                <button onClick={onProjects} className="tab-btn text-xs font-bold tracking-widest text-blue-300">PROJECTS</button>
                 <button onClick={() => uiVM.setActiveTab('generator')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'generator' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>FACTORY</button>
                 <button onClick={() => uiVM.setActiveTab('sets')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'sets' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>SETS</button>
                 <button onClick={() => uiVM.setActiveTab('preview')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'preview' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>PREVIEW</button>
@@ -15,7 +15,7 @@
         );
 
         function App() {
-            const vm = useAppViewModel();
+            const vm = useAppViewModel();\n            const [showProjects, setShowProjects] = React.useState(true);
             React.useEffect(() => {
                 window.__spinosaurusVm = vm;
                 return () => {
@@ -24,12 +24,12 @@
             }, [vm]);
             return (
                 <div className="flex flex-col h-screen bg-[#111] text-gray-200 font-sans">
-                    <NavBar uiVM={vm.ui} />
+                    <NavBar uiVM={vm.ui} onProjects={() => setShowProjects(true)} />
                     <div className="h-8 px-4 border-b border-gray-800 bg-[#121212] flex items-center justify-between text-[11px] text-gray-400 font-mono">
                         <span>LOCAL CACHE</span>
                         <span>{formatBytes(vm.storage.usedBytes)}{vm.storage.quotaBytes ? ` / ${formatBytes(vm.storage.quotaBytes)}` : ''}</span>
                     </div>
-                    <div className="flex-1 overflow-hidden relative">
+                    <div className="flex-1 overflow-hidden relative">\n                        {showProjects && <ProjectLibrary onClose={() => setShowProjects(false)} />}
                         {vm.ui.activeTab === 'builder' && <BuilderTab bVM={vm.builder} uiVM={vm.ui} customOpsVM={vm.customOps} />}
                         {vm.ui.activeTab === 'generator' && <GeneratorTab dVM={vm.dream} libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} flipbookVM={vm.flipbook} />}
                         {vm.ui.activeTab === 'sets' && <SetsTab libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} flipbookVM={vm.flipbook} />}
