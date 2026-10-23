@@ -1,0 +1,11 @@
+{"test":"PB-NAV","name":"Project library entry and editor navigation baseline","suite":"playthrough-preflight","services":["studio"]}
+{"do":"open","page":"app:/"}
+{"do":"expect","kind":"text","equals":"NexusTextureFactory"}
+{"do":"screenshot","name":"project-library"}
+{"do":"click","target":"Back to Studio"}
+{"do":"expect","kind":"text","equals":"FACTORY"}
+{"do":"click","target":"PROJECTS"}
+{"do":"expect","kind":"text","equals":"Import Project"}
+{"do":"reload"}
+{"do":"expect","kind":"text","equals":"NexusTextureFactory"}
+{"do":"expect","kind":"no_errors"}

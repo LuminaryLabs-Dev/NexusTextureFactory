@@ -1,0 +1,66 @@
+{
+  "schema": "nexus-texture-audit-playthroughs/1",
+  "runner": "LuminaryLabs-Dev/NexusAuditor",
+  "acceptance": "ALL_REQUIRED_PASS",
+  "status": "BLOCKED_BY_RUNNER_CAPABILITIES",
+  "required_capabilities": [
+    "persistent_browser_context",
+    "respond_to_js_dialog",
+    "upload_file",
+    "seed_localstorage_and_indexeddb",
+    "assert_indexeddb_records_and_blob_hashes",
+    "simulate_quota_error",
+    "interrupt_transaction_and_relaunch",
+    "record_process_memory"
+  ],
+  "journeys": [
+    {
+      "id": "PB-01",
+      "name": "Create, generate, save, reload, reopen and compare",
+      "required": true,
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "id": "PB-02",
+      "name": "Cross-project isolation and switching",
+      "required": true,
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "id": "PB-03",
+      "name": "Rename, duplicate, modify, delete",
+      "required": true,
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "id": "PB-04",
+      "name": "Export and fresh-profile import",
+      "required": true,
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "id": "PB-05",
+      "name": "Actual V1-V3 fixture migration without mutation",
+      "required": true,
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "id": "PB-06",
+      "name": "Quota, transaction failure and retry",
+      "required": true,
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "id": "PB-07",
+      "name": "Crash during write and recovery",
+      "required": true,
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "id": "PB-08",
+      "name": "Memory and stability during extended playthrough",
+      "required": true,
+      "status": "NOT_EXECUTED"
+    }
+  ]
+}

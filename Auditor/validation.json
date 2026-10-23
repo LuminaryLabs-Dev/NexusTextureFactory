@@ -1,0 +1,33 @@
+{
+  "name": "NexusTextureFactory V4 full browser playthroughs",
+  "allowed_origins": [
+    "http://127.0.0.1:8765"
+  ],
+  "scenario_files": [
+    "Auditor/scenarios/navigation.jsonl"
+  ],
+  "runs_dir": "Auditor/runs",
+  "required_env": [],
+  "variables": {
+    "urls": {
+      "app": "http://127.0.0.1:8765"
+    }
+  },
+  "services": {
+    "studio": {
+      "cwd": ".",
+      "command": [
+        "python3",
+        "-m",
+        "http.server",
+        "8765",
+        "--directory",
+        "Studio"
+      ],
+      "health_urls": [
+        "http://127.0.0.1:8765/"
+      ],
+      "startup_timeout_seconds": 30
+    }
+  }
+}
