@@ -1,7 +1,9 @@
 
 function ProjectLibrary({onClose}) {
  const [projects,setProjects]=React.useState([]),[active,setActive]=React.useState(null),[error,setError]=React.useState(""),[busy,setBusy]=React.useState(false);
- const [saveStatus,setSaveStatus]=React.useState("Saved");\n React.useEffect(()=>{const listener=e=>setSaveStatus(e.detail.status);window.addEventListener("texture-project-save",listener);return()=>window.removeEventListener("texture-project-save",listener);},[]);\n const fileRef=React.useRef(null);
+ const [saveStatus,setSaveStatus]=React.useState("Saved");
+ React.useEffect(()=>{const listener=e=>setSaveStatus(e.detail.status);window.addEventListener("texture-project-save",listener);return()=>window.removeEventListener("texture-project-save",listener);},[]);
+ const fileRef=React.useRef(null);
  const refresh=React.useCallback(async()=>{setProjects(await TextureProjects.list());setActive(await TextureProjects.active());},[]);
  React.useEffect(()=>{TextureProjects.initialize().then(refresh).catch(e=>setError(e.message));},[refresh]);
  const action=async(fn)=>{setBusy(true);setError("");try{await fn();await refresh();}catch(e){setError(e.message);}finally{setBusy(false);}};
