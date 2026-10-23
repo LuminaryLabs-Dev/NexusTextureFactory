@@ -1,7 +1,7 @@
 
 function ProjectLibrary({onClose}) {
  const [projects,setProjects]=React.useState([]),[active,setActive]=React.useState(null),[error,setError]=React.useState(""),[busy,setBusy]=React.useState(false);
- const [saveStatus,setSaveStatus]=React.useState("Saved");
+ const [saveStatus,setSaveStatus]=React.useState("Ready");
  React.useEffect(()=>{const listener=e=>setSaveStatus(e.detail.status);window.addEventListener("texture-project-save",listener);return()=>window.removeEventListener("texture-project-save",listener);},[]);
  const fileRef=React.useRef(null);
  const refresh=React.useCallback(async()=>{setProjects(await TextureProjects.list());setActive(await TextureProjects.active());},[]);
@@ -22,7 +22,7 @@ function ProjectLibrary({onClose}) {
  <div className="space-y-2">{projects.map(p=><div key={p.id} className="border border-gray-700 bg-[#1b1b1b] rounded p-4">
  <div className="flex justify-between gap-4"><div><strong>{p.name}</strong>{active===p.id&&<span className="ml-2 text-blue-300 text-xs">ACTIVE</span>}<div className="text-xs text-gray-400">{p.updatedAt}</div></div><div className="flex flex-wrap justify-end gap-2">
  <button disabled={busy} className="text-blue-300" onClick={()=>action(async()=>{await TextureProjects.open(p.id);location.reload();})}>Open</button>
- <button disabled={busy} onClick={()=>action(()=>TextureProjects.save(p.id))} disabled={busy||active!==p.id}>Save</button>
+ <button disabled={busy||active!==p.id} onClick={()=>action(()=>TextureProjects.save(p.id))}>Save</button>
  <button disabled={busy} onClick={()=>action(async()=>{const name=prompt("Rename project",p.name);if(name)await TextureProjects.rename(p.id,name);})}>Rename</button>
  <button disabled={busy} onClick={()=>action(()=>TextureProjects.duplicate(p.id))}>Duplicate</button>
  <button disabled={busy} onClick={()=>action(async()=>download(p.name.replace(/[^\w-]/g,"_")+".json",await TextureProjects.exportProject(p.id)))}>Export</button>
