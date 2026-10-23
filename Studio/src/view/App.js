@@ -1,5 +1,6 @@
         const NavBar = ({ uiVM, onProjects }) => (
-            <div className="h-12 bg-[#1a1a1a] flex items-center justify-center gap-6 border-b border-gray-800 shrink-0">\n                <button onClick={onProjects} className="tab-btn text-xs font-bold tracking-widest text-blue-300">PROJECTS</button>
+            <div className="h-12 bg-[#1a1a1a] flex items-center justify-center gap-6 border-b border-gray-800 shrink-0">
+                <button onClick={onProjects} className="tab-btn text-xs font-bold tracking-widest text-blue-300">PROJECTS</button>
                 <button onClick={() => uiVM.setActiveTab('generator')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'generator' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>FACTORY</button>
                 <button onClick={() => uiVM.setActiveTab('sets')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'sets' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>SETS</button>
                 <button onClick={() => uiVM.setActiveTab('preview')} className={`tab-btn text-xs font-bold tracking-widest ${uiVM.activeTab === 'preview' ? 'text-white active' : 'text-gray-500 hover:text-gray-300'}`}>PREVIEW</button>
@@ -15,7 +16,8 @@
         );
 
         function App() {
-            const vm = useAppViewModel();\n            const [showProjects, setShowProjects] = React.useState(true);
+            const vm = useAppViewModel();
+            const [showProjects, setShowProjects] = React.useState(true);
             React.useEffect(() => {
                 window.__spinosaurusVm = vm;
                 return () => {
@@ -29,7 +31,8 @@
                         <span>LOCAL CACHE</span>
                         <span>{formatBytes(vm.storage.usedBytes)}{vm.storage.quotaBytes ? ` / ${formatBytes(vm.storage.quotaBytes)}` : ''}</span>
                     </div>
-                    <div className="flex-1 overflow-hidden relative">\n                        {showProjects && <ProjectLibrary onClose={() => setShowProjects(false)} />}
+                    <div className="flex-1 overflow-hidden relative">
+                        {showProjects && <ProjectLibrary onClose={() => setShowProjects(false)} />}
                         {vm.ui.activeTab === 'builder' && <BuilderTab bVM={vm.builder} uiVM={vm.ui} customOpsVM={vm.customOps} />}
                         {vm.ui.activeTab === 'generator' && <GeneratorTab dVM={vm.dream} libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} flipbookVM={vm.flipbook} />}
                         {vm.ui.activeTab === 'sets' && <SetsTab libVM={vm.library} previewEngine={vm.engines.preview} uiVM={vm.ui} flipbookVM={vm.flipbook} />}
